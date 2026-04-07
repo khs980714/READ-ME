@@ -1,0 +1,21 @@
+# ── Web Framework ─────────────────────────────────────────────
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+
+# ── LangChain / LangSmith ─────────────────────────────────────
+langchain>=0.3,<0.4
+langchain-openai>=0.2,<0.3    # OpenAI SDK 기반 NVIDIA NIM 연동
+langchain-community>=0.3,<0.4
+langsmith>=0.1,<0.2
+
+# ── LLM / Embedding ───────────────────────────────────────────
+openai>=1.40,<2.0             # NVIDIA NIM은 OpenAI 호환 SDK로 호출
+
+# ── Database / Vector ─────────────────────────────────────────
+psycopg2-binary>=2.9,<3.0
+pgvector>=0.3,<1.0            # pgvector Python 클라이언트
+
+# ── Environment / Validation ──────────────────────────────────
+python-dotenv>=1.0,<2.0
+pydantic>=2.8,<3.0
+pydantic-settings>=2.3,<3.0  # FastAPI 설정 관리
