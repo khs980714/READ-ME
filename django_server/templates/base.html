@@ -23,10 +23,10 @@
     <div class="navbar-inner">
       <ul class="nav-links">
         <li><a href="{% url 'books:list' %}" class="{% if request.resolver_match.app_name == 'books' and request.resolver_match.url_name == 'list' %}active{% endif %}">도서 목록</a></li>
-        <li><a href="{% url 'chat:page' %}" class="{% if request.resolver_match.app_name == 'chat' %}active{% endif %}">ChatBot</a></li>
+        <li><a href="{% url 'chat:page' %}" class="{% if request.resolver_match.app_name == 'chat' %}active{% endif %}">AI 추천 검색</a></li>
         {% if user.is_staff %}
         <li><a href="{% url 'books:manage' %}" class="{% if request.resolver_match.app_name == 'books' and request.resolver_match.url_name in 'manage,add,edit' %}active{% endif %}">도서 관리</a></li>
-        <li><a href="{% url 'pipeline:index' %}" class="{% if request.resolver_match.app_name == 'pipeline' %}active{% endif %}">데이터 수집</a></li>
+        <li><a href="{% url 'pipeline:index' %}" class="{% if request.resolver_match.app_name == 'pipeline' %}active{% endif %}">데이터 관리</a></li>
         {% endif %}
       </ul>
       <div class="nav-right">

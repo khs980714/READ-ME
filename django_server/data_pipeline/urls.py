@@ -7,5 +7,6 @@ urlpatterns = [
     path("", views.pipeline_page, name="index"),
     path("run/", views.run_pipeline, name="run"),
     path("stream/<str:job_id>/", views.pipeline_stream, name="stream"),
-    path("embed-missing/", views.run_embed_missing, name="embed_missing"),
+    path("embed/run/", views.run_embed_missing, name="embed_run"),
+    path("embed/stream/<str:job_id>/", views.embed_stream, name="embed_stream"),
 ]
