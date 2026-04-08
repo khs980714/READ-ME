@@ -3,6 +3,7 @@ import threading
 
 from django.contrib import messages
 from django.db import IntegrityError
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.db.models import Q
 from django.views.decorators.http import require_POST
@@ -69,6 +70,17 @@ def book_detail(request, pk):
 
 
 # ── 도서 관리 (staff 전용) ─────────────────────────────────────
+
+@_staff_required
+def naver_search_api(request):
+    """네이버 도서 검색 API 프록시 — 도서 추가 팝오버용 (JSON)."""
+    query = request.GET.get("q", "").strip()
+    if not query:
+        return JsonResponse({"results": []})
+    from .services import search_naver_books
+    results = search_naver_books(query)
+    return JsonResponse({"results": results})
+
 
 @_staff_required
 def book_manage(request):

@@ -26,6 +26,38 @@ NAVER_HEADERS = {
 
 # ── Naver Book Search API ─────────────────────────────────────
 
+def search_naver_books(query: str, display: int = 5) -> list[dict]:
+    """Naver Book Search API — 여러 결과 반환 (도서 추가 검색 팝오버용)."""
+    try:
+        resp = requests.get(
+            NAVER_BOOK_URL,
+            headers=NAVER_HEADERS,
+            params={"query": query, "display": display},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        items = resp.json().get("items", [])
+        results = []
+        for item in items:
+            # 저자: Naver는 '^' 로 다중 저자 구분
+            raw_author = _strip_html(item.get("author", ""))
+            author_str = raw_author.replace("^", ", ")
+            pub_date = str(_parse_pubdate(item.get("pubdate", "")) or "")
+            results.append({
+                "title":         _strip_html(item.get("title", "")),
+                "author":        author_str,
+                "publisher":     _strip_html(item.get("publisher", "")),
+                "thumbnail_url": item.get("image", ""),
+                "description":   _strip_html(item.get("description", "")),
+                "isbn":          item.get("isbn", "").split()[-1] if item.get("isbn") else "",
+                "published_at":  pub_date,
+            })
+        return results
+    except Exception as exc:
+        logger.warning("Naver API 검색 오류 (%s): %s", query, exc)
+        return []
+
+
 def fetch_naver_book_info(title: str, author: str = "") -> dict | None:
     """Naver Book Search API로 도서 정보 조회."""
     query = f"{_normalize_title(title)} {author}".strip()
