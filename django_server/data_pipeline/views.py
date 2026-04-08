@@ -50,10 +50,13 @@ def pipeline_page(request):
         .exclude(pk__in=embedded_ids)
         .count()
     )
+    # description 있음 + difficulty 미분류
+    unclassified = BookList.objects.exclude(description="").filter(difficulty="").count()
     return render(request, "data_pipeline/index.html", {
         "total_books":   total_books,
         "pending":       pending,
         "missing_embed": missing_embed,
+        "unclassified":  unclassified,
     })
 
 
@@ -184,6 +187,82 @@ def _embed_worker(job_id: str, q: Queue, targets: list):
 def embed_stream(request, job_id: str):
     """SSE 스트림 — 임베딩 진행 상황."""
     return _make_sse_response(_embed_jobs, _embed_jobs_lock, job_id)
+
+
+# ── 난이도 분류 ───────────────────────────────────────────────
+
+_classify_jobs: dict[str, Queue] = {}
+_classify_jobs_lock = threading.Lock()
+_classify_running = threading.Event()
+
+
+@_staff_required
+@require_POST
+def run_classify(request):
+    """description 있음 + difficulty 미분류 도서를 SSE 방식으로 일괄 분류."""
+    if _classify_running.is_set():
+        return JsonResponse({"error": "이미 난이도 분류가 진행 중입니다."}, status=409)
+
+    from books.models import BookList
+    targets = list(
+        BookList.objects
+        .exclude(description="")
+        .filter(difficulty="")
+        .order_by("title")
+    )
+    if not targets:
+        return JsonResponse({"error": "분류할 도서가 없습니다."}, status=404)
+
+    job_id = str(uuid.uuid4())
+    q: Queue = Queue()
+    with _classify_jobs_lock:
+        _classify_jobs[job_id] = q
+
+    threading.Thread(target=_classify_worker, args=(job_id, q, targets), daemon=True).start()
+    return JsonResponse({"job_id": job_id})
+
+
+def _classify_worker(job_id: str, q: Queue, targets: list):
+    _classify_running.set()
+    try:
+        from books.services import classify_difficulty, scrape_reviews
+
+        total = len(targets)
+        q.put({"type": "start", "total": total})
+
+        done = errors = 0
+        for bl in targets:
+            q.put({"type": "progress", "done": done, "total": total, "current": bl.title})
+            try:
+                reviews = scrape_reviews(bl.title)
+                difficulty = classify_difficulty(bl.title, bl.description, reviews)
+                if difficulty and difficulty in ("입문", "초급", "중급", "고급"):
+                    bl.difficulty = difficulty
+                    bl.save(update_fields=["difficulty"])
+                    done += 1
+                    q.put({"type": "log", "status": "success",
+                           "title": bl.title, "difficulty": difficulty})
+                else:
+                    errors += 1
+                    q.put({"type": "log", "status": "error",
+                           "title": bl.title,
+                           "error": f"분류 실패 (응답: {difficulty!r})"})
+            except Exception as e:
+                errors += 1
+                q.put({"type": "log", "status": "error",
+                       "title": bl.title, "error": str(e)})
+
+        q.put({"type": "complete", "done": done, "errors": errors, "total": total})
+    except Exception as e:
+        q.put({"type": "fatal", "error": str(e)})
+    finally:
+        q.put(None)
+        _classify_running.clear()
+
+
+def classify_stream(request, job_id: str):
+    """SSE 스트림 — 난이도 분류 진행 상황."""
+    return _make_sse_response(_classify_jobs, _classify_jobs_lock, job_id)
 
 
 # ── SSE 공통 헬퍼 ─────────────────────────────────────────────

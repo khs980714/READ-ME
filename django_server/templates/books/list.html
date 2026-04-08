@@ -22,6 +22,7 @@
     <div class="filter-controls">
       <select name="difficulty" class="filter-select">
         <option value="">난이도 전체</option>
+        <option value="미분류" {% if selected_difficulty == "미분류" %}selected{% endif %}>미분류</option>
         {% for val, label in difficulties %}
           <option value="{{ val }}" {% if selected_difficulty == val %}selected{% endif %}>{{ label }}</option>
         {% endfor %}

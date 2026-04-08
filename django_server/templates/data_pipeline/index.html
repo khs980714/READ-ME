@@ -7,7 +7,7 @@
 <style>
   .pipeline-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: 16px;
     margin-bottom: 28px;
   }
@@ -134,13 +134,15 @@
   </div>
   <div class="stat-card">
     <p class="stat-label">미수집 도서 (설명 없음)</p>
-    <p class="stat-value">{{ pending }}</p>
+    <p class="stat-value" style="color:{% if pending %}#d97706{% else %}var(--primary){% endif %}">{{ pending }}</p>
   </div>
   <div class="stat-card">
     <p class="stat-label">임베딩 누락 도서</p>
-    <p class="stat-value" style="color:{% if missing_embed %}#d97706{% else %}var(--primary){% endif %}">
-      {{ missing_embed }}
-    </p>
+    <p class="stat-value" style="color:{% if missing_embed %}#d97706{% else %}var(--primary){% endif %}">{{ missing_embed }}</p>
+  </div>
+  <div class="stat-card">
+    <p class="stat-label">난이도 미분류 도서</p>
+    <p class="stat-value" style="color:{% if unclassified %}#d97706{% else %}var(--primary){% endif %}">{{ unclassified }}</p>
   </div>
 </div>
 
@@ -212,6 +214,39 @@
     <div id="embedLog"></div>
   </div>
 </div>
+<!-- ── 난이도 분류 진행 ── -->
+<div class="pipeline-card">
+  <h2>난이도 분류 진행</h2>
+  <p class="card-desc">
+    설명은 있지만 난이도가 미분류인 <strong>{{ unclassified }}권</strong>을 대상으로
+    Yes24 리뷰 스크래핑 후 LLM으로 난이도를 분류합니다.
+    {% if not unclassified %}현재 미분류 도서가 없습니다.{% endif %}
+  </p>
+
+  <div class="pipeline-controls">
+    <button class="btn-primary" id="btnClassify" {% if not unclassified %}disabled{% endif %}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+      </svg>
+      난이도 분류 시작 ({{ unclassified }}권)
+    </button>
+    <span class="status-badge" id="classifyStatus"></span>
+  </div>
+
+  <div class="progress-wrap" id="classifyProgressWrap" style="display:none;">
+    <div class="progress-meta">
+      <span id="classifyProgressText">0 / 0</span>
+      <span id="classifyProgressPct">0%</span>
+    </div>
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" id="classifyProgressBar"></div>
+    </div>
+    <p class="progress-current" id="classifyCurrent"></p>
+  </div>
+  <div class="log-wrap" id="classifyLogWrap" style="display:none;">
+    <div id="classifyLog"></div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -221,10 +256,12 @@
   const PIPELINE_STREAM   = "{% url 'pipeline:stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000", "");
   const EMBED_RUN_URL     = "{% url 'pipeline:embed_run' %}";
   const EMBED_STREAM      = "{% url 'pipeline:embed_stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000", "");
+  const CLASSIFY_RUN_URL  = "{% url 'pipeline:classify_run' %}";
+  const CLASSIFY_STREAM   = "{% url 'pipeline:classify_stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000", "");
 
   // ── 공통 로그 렌더러 ─────────────────────────────────────────
   function appendLog(container, type, opts = {}) {
-    const { bookCode, title, errorMsg, subMsgs } = opts;
+    const { bookCode, title, errorMsg, subMsgs, difficulty } = opts;
     const entry = document.createElement("div");
     entry.className = `log-entry ${type}`;
 
@@ -247,6 +284,13 @@
         s.className = "log-title";
         s.textContent = title;
         main.appendChild(s);
+      }
+      if (difficulty) {
+        const d = document.createElement("span");
+        d.className = "log-sub-msg";
+        d.style.marginLeft = "8px";
+        d.textContent = `→ ${difficulty}`;
+        main.appendChild(d);
       }
       body.appendChild(main);
     } else if (errorMsg) {
@@ -343,7 +387,8 @@
         } else if (ev.type === "log") {
           if (ev.status === "success") {
             appendLog(logContainer, "success", {
-              bookCode: ev.book_code, title: ev.title, subMsgs: ev.messages
+              bookCode: ev.book_code, title: ev.title,
+              subMsgs: ev.messages, difficulty: ev.difficulty
             });
           } else {
             appendLog(logContainer, "error", {
@@ -409,6 +454,22 @@
     logWrap:      document.getElementById("embedLogWrap"),
     logContainer: document.getElementById("embedLog"),
     startLabel:   "임베딩",
+  });
+
+  // ── 난이도 분류 섹션 ─────────────────────────────────────────
+  createStreamHandler({
+    runUrl:       CLASSIFY_RUN_URL,
+    streamBase:   CLASSIFY_STREAM,
+    btn:          document.getElementById("btnClassify"),
+    statusBadge:  document.getElementById("classifyStatus"),
+    progressWrap: document.getElementById("classifyProgressWrap"),
+    progressBar:  document.getElementById("classifyProgressBar"),
+    progressText: document.getElementById("classifyProgressText"),
+    progressPct:  document.getElementById("classifyProgressPct"),
+    currentEl:    document.getElementById("classifyCurrent"),
+    logWrap:      document.getElementById("classifyLogWrap"),
+    logContainer: document.getElementById("classifyLog"),
+    startLabel:   "난이도 분류",
   });
 </script>
 {% endblock %}

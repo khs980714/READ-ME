@@ -38,7 +38,9 @@ def book_list(request):
             Q(book_list__title__icontains=query)
             | Q(book_list__author__name__icontains=query)
         ).distinct()
-    if difficulty:
+    if difficulty == "미분류":
+        qs = qs.filter(book_list__difficulty="")
+    elif difficulty:
         qs = qs.filter(book_list__difficulty=difficulty)
     if category_id:
         qs = qs.filter(book_list__categories__id=category_id)
