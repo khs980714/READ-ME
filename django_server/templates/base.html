@@ -22,9 +22,10 @@
   <nav class="navbar">
     <div class="navbar-inner">
       <ul class="nav-links">
-        <li><a href="{% url 'books:list' %}" class="{% if request.resolver_match.app_name == 'books' %}active{% endif %}">도서 목록</a></li>
+        <li><a href="{% url 'books:list' %}" class="{% if request.resolver_match.app_name == 'books' and request.resolver_match.url_name == 'list' %}active{% endif %}">도서 목록</a></li>
         <li><a href="{% url 'chat:page' %}" class="{% if request.resolver_match.app_name == 'chat' %}active{% endif %}">ChatBot</a></li>
         {% if user.is_staff %}
+        <li><a href="{% url 'books:manage' %}" class="{% if request.resolver_match.app_name == 'books' and request.resolver_match.url_name in 'manage,add,edit' %}active{% endif %}">도서 관리</a></li>
         <li><a href="{% url 'pipeline:index' %}" class="{% if request.resolver_match.app_name == 'pipeline' %}active{% endif %}">데이터 수집</a></li>
         {% endif %}
       </ul>
@@ -32,12 +33,12 @@
         {% if user.is_authenticated %}
           <span class="admin-badge">관리자</span>
           <a href="{% url 'admin:index' %}" class="btn-nav">관리자 페이지</a>
-          <form method="post" action="{% url 'logout' %}" style="display:inline;">
+          <form method="post" action="{% url 'accounts:logout' %}" style="display:inline;">
             {% csrf_token %}
             <button type="submit" class="btn-nav btn-nav--ghost">로그아웃</button>
           </form>
         {% else %}
-          <a href="{% url 'admin:login' %}?next=/" class="btn-nav btn-nav--ghost">관리자 로그인</a>
+          <a href="{% url 'accounts:login' %}?next={{ request.path }}" class="btn-nav btn-nav--ghost">관리자 로그인</a>
         {% endif %}
       </div>
     </div>
@@ -52,6 +53,94 @@
   <footer class="footer">
     <p>© 2025 READ:ME — IT 도서 추천 서비스</p>
   </footer>
+
+  <!-- ── 유휴 타임아웃 (관리자 로그인 시) ──────────────────── -->
+  {% if user.is_authenticated %}
+  <div id="idleModal" style="
+    display:none; position:fixed; inset:0; z-index:9999;
+    background:rgba(0,0,0,.5); align-items:center; justify-content:center;">
+    <div style="
+      background:#fff; border-radius:12px; padding:32px 36px;
+      max-width:360px; width:90%; text-align:center; box-shadow:0 8px 32px rgba(0,0,0,.2);">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2"
+           style="margin:0 auto 16px;">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="8" x2="12" y2="12"/>
+        <line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      <p style="font-size:1.05rem;font-weight:700;margin-bottom:8px;">자동 로그아웃 예정</p>
+      <p style="font-size:0.88rem;color:#555;margin-bottom:20px;">
+        <span id="idleCountdown">2</span>분 후 자동으로 로그아웃됩니다.<br>
+        계속 사용하려면 아래 버튼을 눌러주세요.
+      </p>
+      <button onclick="resetIdle()" style="
+        background:#504197;color:#fff;border:none;border-radius:8px;
+        padding:10px 24px;font-size:0.9rem;font-weight:700;cursor:pointer;">
+        계속 사용하기
+      </button>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const IDLE_TIMEOUT_MS = {{ idle_timeout_ms|default:1800000 }};
+      const WARNING_BEFORE_MS = 120000;  // 2분 전 경고
+      const LOGOUT_URL = "{% url 'accounts:logout' %}";
+      const CSRF = "{{ csrf_token }}";
+
+      let idleTimer = null;
+      let warnTimer = null;
+      let countdownInterval = null;
+      const modal = document.getElementById("idleModal");
+      const countdownEl = document.getElementById("idleCountdown");
+
+      function doLogout() {
+        const form = document.createElement("form");
+        form.method = "POST";
+        form.action = LOGOUT_URL;
+        const csrf = document.createElement("input");
+        csrf.type = "hidden";
+        csrf.name = "csrfmiddlewaretoken";
+        csrf.value = CSRF;
+        form.appendChild(csrf);
+        document.body.appendChild(form);
+        form.submit();
+      }
+
+      function showWarning() {
+        modal.style.display = "flex";
+        let secs = Math.round(WARNING_BEFORE_MS / 1000);
+        countdownEl.textContent = Math.ceil(secs / 60);
+        countdownInterval = setInterval(() => {
+          secs -= 1;
+          countdownEl.textContent = Math.ceil(secs / 60) || "< 1";
+          if (secs <= 0) clearInterval(countdownInterval);
+        }, 1000);
+      }
+
+      function hideWarning() {
+        modal.style.display = "none";
+        if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+      }
+
+      window.resetIdle = function () {
+        hideWarning();
+        clearTimeout(idleTimer);
+        clearTimeout(warnTimer);
+        warnTimer  = setTimeout(showWarning, IDLE_TIMEOUT_MS - WARNING_BEFORE_MS);
+        idleTimer  = setTimeout(doLogout,    IDLE_TIMEOUT_MS);
+      };
+
+      ["mousemove", "mousedown", "keypress", "touchstart", "scroll", "click"].forEach(evt => {
+        document.addEventListener(evt, () => {
+          if (modal.style.display === "none") resetIdle();
+        }, { passive: true });
+      });
+
+      resetIdle();
+    })();
+  </script>
+  {% endif %}
 
   {% block extra_js %}{% endblock %}
 </body>

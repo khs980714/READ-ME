@@ -17,5 +17,8 @@ requests>=2.32,<3.0           # Naver Book Search API
 beautifulsoup4>=4.12,<5.0     # 리뷰 스크래핑
 lxml>=5.2,<6.0                # bs4 HTML 파서
 
+# ── Auth ──────────────────────────────────────────────────────
+PyJWT>=2.8,<3.0               # JWT 토큰 발급 및 검증
+
 # ── Production Server ─────────────────────────────────────────
 gunicorn>=22.0,<23.0

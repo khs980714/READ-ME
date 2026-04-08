@@ -1,3 +1,4 @@
+from datetime import timedelta
 from pathlib import Path
 import os
 
@@ -29,6 +30,7 @@ INSTALLED_APPS = [
     "books.apps.BooksConfig",
     "chat.apps.ChatConfig",
     "data_pipeline.apps.DataPipelineConfig",
+    "accounts.apps.AccountsConfig",
 ]
 
 MIDDLEWARE = [
@@ -38,6 +40,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "accounts.middleware.JWTAuthMiddleware",  # JWT 쿠키 → request.user (세션 인증 후)
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -55,6 +58,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "accounts.context_processors.jwt_settings",
             ],
         },
     },
@@ -112,6 +116,19 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# ── JWT ───────────────────────────────────────────────────────
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", SECRET_KEY)
+# Access token: 요청마다 검증, 짧게 유지
+JWT_ACCESS_TOKEN_LIFETIME = timedelta(
+    minutes=int(os.getenv("JWT_ACCESS_TOKEN_LIFETIME_MINUTES", "15"))
+)
+# Refresh token: Access token 만료 시 재발급용, 길게 유지
+JWT_REFRESH_TOKEN_LIFETIME = timedelta(
+    days=int(os.getenv("JWT_REFRESH_TOKEN_LIFETIME_DAYS", "7"))
+)
+# 유휴 타임아웃(분): JS 측에서 이 시간 동안 활동 없으면 자동 로그아웃
+JWT_IDLE_TIMEOUT_MINUTES = int(os.getenv("JWT_IDLE_TIMEOUT_MINUTES", "30"))
 
 # ── External services ─────────────────────────────────────────
 NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID", "")
