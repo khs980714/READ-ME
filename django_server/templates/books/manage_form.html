@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{% if mode == "add" %}도서 추가{% else %}도서 수정{% endif %} — READ:ME{% endblock %}
+
+{% block extra_css %}
+<style>
+  .form-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px 36px;
+    box-shadow: var(--shadow-sm);
+  }
+  .form-section {
+    margin-bottom: 28px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .form-section:last-of-type { border-bottom: none; }
+  .form-section-title {
+    font-size: 0.88rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-muted);
+    margin-bottom: 18px;
+  }
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .form-grid--3 { grid-template-columns: 1fr 1fr 1fr; }
+  .form-col-full { grid-column: 1 / -1; }
+
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-sub);
+  }
+  .form-label .required { color: var(--red); margin-left: 2px; }
+  .form-input, .form-select, .form-textarea {
+    padding: 9px 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-family: inherit;
+    background: var(--bg);
+    color: var(--text);
+    outline: none;
+    transition: border-color .2s, background .2s;
+    width: 100%;
+  }
+  .form-input:focus, .form-select:focus, .form-textarea:focus {
+    border-color: var(--primary);
+    background: #fff;
+  }
+  .form-textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
+
+  /* 카테고리 체크박스 */
+  .checkbox-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+  }
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    transition: border-color .2s, background .2s;
+    user-select: none;
+  }
+  .checkbox-label:hover { border-color: var(--primary); }
+  .checkbox-label input { display: none; }
+  .checkbox-label.checked {
+    background: var(--primary-light);
+    border-color: var(--primary);
+    color: var(--primary);
+    font-weight: 600;
+  }
+
+  /* 활성화 토글 */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .toggle-switch {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+  }
+  .toggle-switch input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background: var(--border);
+    border-radius: 24px;
+    transition: .2s;
+  }
+  .toggle-slider::before {
+    content: "";
+    position: absolute;
+    height: 18px; width: 18px;
+    left: 3px; bottom: 3px;
+    background: white;
+    border-radius: 50%;
+    transition: .2s;
+  }
+  .toggle-switch input:checked + .toggle-slider { background: var(--primary); }
+  .toggle-switch input:checked + .toggle-slider::before { transform: translateX(20px); }
+  .toggle-desc { font-size: 0.88rem; color: var(--text-sub); }
+
+  .form-error {
+    background: #fee2e2;
+    color: #dc2626;
+    border: 1px solid #fca5a5;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 0.88rem;
+    margin-bottom: 20px;
+  }
+  .form-actions {
+    display: flex;
+    gap: 10px;
+    padding-top: 8px;
+  }
+
+  @media (max-width: 640px) {
+    .form-card { padding: 20px 16px; }
+    .form-grid { grid-template-columns: 1fr; }
+    .form-grid--3 { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="detail-back">
+  <a href="{% url 'books:manage' %}" class="back-link">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <polyline points="15 18 9 12 15 6"/>
+    </svg>
+    도서 관리로 돌아가기
+  </a>
+</div>
+
+<section class="page-header">
+  <h1 class="page-title">{% if mode == "add" %}도서 추가{% else %}도서 수정 — {{ book.book_code }}{% endif %}</h1>
+  <p class="page-desc">
+    {% if mode == "add" %}새 도서를 등록합니다. 저자·출판사는 없으면 자동으로 생성됩니다.
+    {% else %}도서 정보를 수정합니다.{% endif %}
+  </p>
+</section>
+
+{% if error %}
+<div class="form-error">{{ error }}</div>
+{% endif %}
+
+<div class="form-card">
+  <form method="post">
+    {% csrf_token %}
+
+    <!-- 기본 정보 -->
+    <div class="form-section">
+      <p class="form-section-title">기본 정보</p>
+      <div class="form-grid">
+        {% if mode == "add" %}
+        <div class="form-group">
+          <label class="form-label" for="book_code">
+            도서 코드<span class="required">*</span>
+          </label>
+          <input class="form-input" type="text" id="book_code" name="book_code"
+                 placeholder="D-246" value="{{ form_data.book_code|default:'' }}" required>
+        </div>
+        {% endif %}
+
+        <div class="form-group {% if mode == 'edit' %}form-col-full{% endif %}">
+          <label class="form-label" for="title">
+            도서명<span class="required">*</span>
+          </label>
+          <input class="form-input" type="text" id="title" name="title"
+                 placeholder="도서 제목을 입력하세요"
+                 value="{{ form_data.title|default:book_list.title|default:'' }}" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="author">
+            저자<span class="required">*</span>
+          </label>
+          <input class="form-input" type="text" id="author" name="author"
+                 placeholder="저자 이름 (없으면 자동 생성)"
+                 value="{{ form_data.author|default:book_list.author.name|default:'' }}" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="publisher">
+            출판사<span class="required">*</span>
+          </label>
+          <input class="form-input" type="text" id="publisher" name="publisher"
+                 placeholder="출판사명 (없으면 자동 생성)"
+                 value="{{ form_data.publisher|default:book_list.publisher.name|default:'' }}" required>
+        </div>
+      </div>
+    </div>
+
+    <!-- 수집 정보 -->
+    <div class="form-section">
+      <p class="form-section-title">수집 정보</p>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label" for="difficulty">난이도</label>
+          <select class="form-select" id="difficulty" name="difficulty">
+            <option value="">— 선택 안함 —</option>
+            {% for val, label in difficulties %}
+              <option value="{{ val }}"
+                {% if form_data.difficulty == val or book_list.difficulty == val %}selected{% endif %}>
+                {{ label }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="isbn">ISBN</label>
+          <input class="form-input" type="text" id="isbn" name="isbn"
+                 placeholder="978-89-..."
+                 value="{{ form_data.isbn|default:book_list.isbn|default:'' }}">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="published_at">출판일</label>
+          <input class="form-input" type="date" id="published_at" name="published_at"
+                 value="{{ form_data.published_at|default:book_list.published_at|default:'' }}">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="page_count">페이지 수</label>
+          <input class="form-input" type="number" id="page_count" name="page_count"
+                 placeholder="0" min="1"
+                 value="{{ form_data.page_count|default:book_list.page_count|default:'' }}">
+        </div>
+
+        <div class="form-group form-col-full">
+          <label class="form-label" for="thumbnail_url">썸네일 URL</label>
+          <input class="form-input" type="url" id="thumbnail_url" name="thumbnail_url"
+                 placeholder="https://..."
+                 value="{{ form_data.thumbnail_url|default:book_list.thumbnail_url|default:'' }}">
+        </div>
+
+        <div class="form-group form-col-full">
+          <label class="form-label" for="description">도서 소개</label>
+          <textarea class="form-textarea" id="description" name="description"
+                    placeholder="도서 소개 내용을 입력하세요">{{ form_data.description|default:book_list.description|default:'' }}</textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- 카테고리 -->
+    {% if categories %}
+    <div class="form-section">
+      <p class="form-section-title">카테고리</p>
+      <div class="checkbox-group" id="categoryGroup">
+        {% for cat in categories %}
+        <label class="checkbox-label{% if cat.id in selected_category_ids or cat.id|stringformat:'s' in form_data.getlist|default:'' %} checked{% endif %}"
+               data-id="{{ cat.id }}">
+          <input type="checkbox" name="categories" value="{{ cat.id }}"
+                 {% if cat.id in selected_category_ids %} checked{% endif %}>
+          {{ cat.name }}
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- 설정 -->
+    <div class="form-section">
+      <p class="form-section-title">설정</p>
+      <div class="toggle-row">
+        <label class="toggle-switch">
+          <input type="checkbox" name="is_active" id="is_active"
+                 {% if mode == 'add' or book.is_active %}checked{% endif %}>
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="toggle-desc">도서 목록에 노출 (활성화)</span>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn-primary">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        {% if mode == "add" %}도서 추가{% else %}변경사항 저장{% endif %}
+      </button>
+      <a href="{% url 'books:manage' %}" class="btn-ghost">취소</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  // 카테고리 체크박스 토글 스타일
+  document.querySelectorAll(".checkbox-label").forEach(label => {
+    const cb = label.querySelector("input[type=checkbox]");
+    label.addEventListener("click", () => {
+      cb.checked = !cb.checked;
+      label.classList.toggle("checked", cb.checked);
+    });
+  });
+</script>
+{% endblock %}

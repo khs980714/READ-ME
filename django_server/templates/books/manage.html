@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}도서 관리 — READ:ME{% endblock %}
+
+{% block extra_css %}
+<style>
+  .manage-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .manage-search {
+    position: relative;
+    flex: 1;
+    min-width: 200px;
+  }
+  .manage-search svg {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 16px; height: 16px;
+    color: var(--text-muted);
+  }
+  .manage-search input {
+    width: 100%;
+    padding: 9px 12px 9px 36px;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-family: inherit;
+    background: var(--bg);
+    outline: none;
+    transition: border-color .2s;
+  }
+  .manage-search input:focus { border-color: var(--primary); background: #fff; }
+
+  .manage-table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+  .manage-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+  }
+  .manage-table thead { background: var(--bg); }
+  .manage-table th {
+    padding: 12px 16px;
+    text-align: left;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.4px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .manage-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  .manage-table tbody tr:last-child td { border-bottom: none; }
+  .manage-table tbody tr:hover { background: var(--primary-light); }
+
+  .td-code { font-size: 0.78rem; color: var(--text-muted); font-weight: 600; white-space: nowrap; }
+  .td-title { font-weight: 600; max-width: 280px; }
+  .td-title a { color: var(--text); transition: color .2s; }
+  .td-title a:hover { color: var(--primary); }
+  .td-author, .td-publisher { color: var(--text-sub); white-space: nowrap; }
+  .td-inactive { color: var(--text-muted); font-size: 0.78rem; }
+
+  .action-group { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+  .btn-table-edit {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 12px;
+    background: var(--primary-light);
+    color: var(--primary);
+    border: 1px solid transparent;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background .2s, border-color .2s;
+  }
+  .btn-table-edit:hover { background: #e0d8f8; border-color: var(--primary); }
+  .btn-table-delete {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 10px;
+    background: #fee2e2;
+    color: #dc2626;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .2s, border-color .2s;
+  }
+  .btn-table-delete:hover { background: #fca5a5; border-color: #dc2626; }
+
+  .empty-row td {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-muted);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <h1 class="page-title">도서 관리</h1>
+  <p class="page-desc">도서 정보를 직접 추가하거나 수정합니다.</p>
+</section>
+
+<!-- 플래시 메시지 -->
+{% if messages %}
+  {% for msg in messages %}
+  <div style="
+    margin-bottom:16px; padding:12px 16px; border-radius:8px;
+    background:{% if msg.tags == 'success' %}#dcfce7{% else %}#fee2e2{% endif %};
+    color:{% if msg.tags == 'success' %}#16a34a{% else %}#dc2626{% endif %};
+    border:1px solid {% if msg.tags == 'success' %}#86efac{% else %}#fca5a5{% endif %};
+    font-size:0.9rem; font-weight:600;">
+    {{ msg }}
+  </div>
+  {% endfor %}
+{% endif %}
+
+<!-- 툴바 -->
+<form method="get" action="">
+  <div class="manage-toolbar">
+    <div class="manage-search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <input type="text" name="q" value="{{ query }}" placeholder="도서 코드, 도서명, 저자 검색">
+    </div>
+    <button type="submit" class="btn-ghost" style="flex-shrink:0;">검색</button>
+    {% if query %}<a href="{% url 'books:manage' %}" class="btn-ghost" style="flex-shrink:0;">초기화</a>{% endif %}
+    <a href="{% url 'books:add' %}" class="btn-primary" style="flex-shrink:0;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+      도서 추가
+    </a>
+  </div>
+</form>
+
+<!-- 도서 테이블 -->
+<div class="manage-table-wrap">
+  <table class="manage-table">
+    <thead>
+      <tr>
+        <th>코드</th>
+        <th>도서명</th>
+        <th>저자</th>
+        <th>출판사</th>
+        <th>난이도</th>
+        <th>상태</th>
+        <th>작업</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for book in books %}
+      <tr>
+        <td class="td-code">{{ book.book_code }}</td>
+        <td class="td-title">
+          <a href="{% url 'books:detail' book.pk %}">{{ book.book_list.title }}</a>
+        </td>
+        <td class="td-author">{{ book.book_list.author.name }}</td>
+        <td class="td-publisher">{{ book.book_list.publisher.name }}</td>
+        <td>
+          {% if book.book_list.difficulty %}
+            <span class="badge badge--{{ book.book_list.difficulty }}">{{ book.book_list.difficulty }}</span>
+          {% else %}
+            <span class="td-inactive">미분류</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if book.is_active %}
+            <span style="font-size:0.78rem;font-weight:600;color:#16a34a;">활성</span>
+          {% else %}
+            <span class="td-inactive">비활성</span>
+          {% endif %}
+        </td>
+        <td>
+          <div class="action-group">
+            <a href="{% url 'books:edit' book.pk %}" class="btn-table-edit">수정</a>
+            <form method="post" action="{% url 'books:delete' book.pk %}"
+                  onsubmit="return confirm('도서 [{{ book.book_code }}] {{ book.book_list.title }}을(를) 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.')">
+              {% csrf_token %}
+              <button type="submit" class="btn-table-delete">삭제</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr class="empty-row">
+        <td colspan="7">등록된 도서가 없습니다.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
