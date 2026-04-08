@@ -186,15 +186,23 @@ button { cursor: pointer; font-family: inherit; }
 
 .filter-form {
   display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 검색·필터 각 행 */
+.filter-row {
+  display: flex;
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
 }
 
+.filter-row--search { width: 100%; }
+
 .search-box {
   position: relative;
-  flex: 1;
-  min-width: 200px;
+  width: 100%;
 }
 .search-icon {
   position: absolute;
@@ -417,6 +425,6 @@ button { cursor: pointer; font-family: inherit; }
   .detail-wrap { flex-direction: column; padding: 20px; }
   .detail-thumb { width: 140px; margin: 0 auto; }
   .book-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
-  .filter-form { flex-direction: column; }
-  .search-box { min-width: 100%; }
+  /* filter-form은 이미 flex-direction:column — 별도 override 불필요 */
+  .filter-row--controls { flex-wrap: nowrap; overflow-x: auto; }
 }

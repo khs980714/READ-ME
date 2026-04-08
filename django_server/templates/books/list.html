@@ -12,29 +12,35 @@
 <!-- ── 검색·필터 ──────────────────────────────────────────── -->
 <div class="filter-bar">
   <form class="filter-form" method="get" action="">
-    <div class="search-box">
-      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-      </svg>
-      <input type="text" name="q" value="{{ query }}" placeholder="도서명 또는 저자 검색" class="search-input">
+    <!-- 1행: 검색창 -->
+    <div class="filter-row filter-row--search">
+      <div class="search-box">
+        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input type="text" name="q" value="{{ query }}" placeholder="도서명 또는 저자 검색" class="search-input">
+      </div>
     </div>
 
-    <select name="difficulty" class="filter-select">
-      <option value="">난이도 전체</option>
-      {% for val, label in difficulties %}
-        <option value="{{ val }}" {% if selected_difficulty == val %}selected{% endif %}>{{ label }}</option>
-      {% endfor %}
-    </select>
+    <!-- 2행: 필터 선택 + 버튼 -->
+    <div class="filter-row filter-row--controls">
+      <select name="difficulty" class="filter-select">
+        <option value="">난이도 전체</option>
+        {% for val, label in difficulties %}
+          <option value="{{ val }}" {% if selected_difficulty == val %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
 
-    <select name="category" class="filter-select">
-      <option value="">카테고리 전체</option>
-      {% for cat in categories %}
-        <option value="{{ cat.id }}" {% if selected_category == cat.id|stringformat:"s" %}selected{% endif %}>{{ cat.name }}</option>
-      {% endfor %}
-    </select>
+      <select name="category" class="filter-select">
+        <option value="">카테고리 전체</option>
+        {% for cat in categories %}
+          <option value="{{ cat.id }}" {% if selected_category == cat.id|stringformat:"s" %}selected{% endif %}>{{ cat.name }}</option>
+        {% endfor %}
+      </select>
 
-    <button type="submit" class="btn-primary">검색</button>
-    <a href="{% url 'books:list' %}" class="btn-ghost">초기화</a>
+      <button type="submit" class="btn-primary">검색</button>
+      <a href="{% url 'books:list' %}" class="btn-ghost">초기화</a>
+    </div>
   </form>
 </div>
 
