@@ -12,18 +12,14 @@
 <!-- ── 검색·필터 ──────────────────────────────────────────── -->
 <div class="filter-bar">
   <form class="filter-form" method="get" action="">
-    <!-- 1행: 검색창 -->
-    <div class="filter-row filter-row--search">
-      <div class="search-box">
-        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-        </svg>
-        <input type="text" name="q" value="{{ query }}" placeholder="도서명 또는 저자 검색" class="search-input">
-      </div>
+    <div class="search-box">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <input type="text" name="q" value="{{ query }}" placeholder="도서명 또는 저자 검색" class="search-input">
     </div>
 
-    <!-- 2행: 필터 선택 + 버튼 -->
-    <div class="filter-row filter-row--controls">
+    <div class="filter-controls">
       <select name="difficulty" class="filter-select">
         <option value="">난이도 전체</option>
         {% for val, label in difficulties %}

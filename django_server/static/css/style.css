@@ -184,25 +184,27 @@ button { cursor: pointer; font-family: inherit; }
   box-shadow: var(--shadow-sm);
 }
 
+/* 검색창 + 컨트롤 묶음을 한 줄로 배치.
+   공간이 부족해지면 컨트롤 묶음 전체가 다음 줄로 이동. */
 .filter-form {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-/* 검색·필터 각 행 */
-.filter-row {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
 }
 
-.filter-row--search { width: 100%; }
-
 .search-box {
   position: relative;
-  width: 100%;
+  flex: 1;
+  min-width: 200px;
+}
+
+/* 난이도·카테고리·버튼을 하나의 묶음으로 유지 */
+.filter-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-shrink: 0;
 }
 .search-icon {
   position: absolute;
@@ -425,6 +427,5 @@ button { cursor: pointer; font-family: inherit; }
   .detail-wrap { flex-direction: column; padding: 20px; }
   .detail-thumb { width: 140px; margin: 0 auto; }
   .book-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
-  /* filter-form은 이미 flex-direction:column — 별도 override 불필요 */
-  .filter-row--controls { flex-wrap: nowrap; overflow-x: auto; }
+  /* filter-form: flex-wrap이 자동 처리하므로 별도 override 불필요 */
 }
