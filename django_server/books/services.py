@@ -141,7 +141,8 @@ def generate_embedding(book_list_id: int, title: str, description: str) -> bool:
 def run_book_pipeline(book, progress_callback=None) -> None:
     """
     도서 데이터 수집 파이프라인 (BookList 단위 중복 방지):
-    1. Naver API → thumbnail, description, isbn, published_at (description 없을 때만)
+    1. Naver API → description·isbn·thumbnail 중 하나라도 비어있으면 호출,
+                   이미 채워진 필드는 덮어쓰지 않음
     2. 리뷰 스크래핑
     3. LLM 난이도 분류 (difficulty 없을 때만)
     4. 임베딩 생성 (embedding 없을 때만)
@@ -158,18 +159,24 @@ def run_book_pipeline(book, progress_callback=None) -> None:
         else:
             logger.info(msg)
 
-    # 1) Naver API — description이 비어있을 때만 호출
-    if not book_list.description:
+    # 1) Naver API — 수집이 필요한 필드가 하나라도 비어있으면 호출
+    #    이미 입력된 필드(description 포함)는 덮어쓰지 않음
+    needs_naver = (
+        not book_list.description
+        or not book_list.isbn
+        or not book_list.thumbnail_url
+    )
+    if needs_naver:
         _log("Naver API 조회 중...")
         info = fetch_naver_book_info(book_list.title, author_name)
         if info:
-            if info.get("thumbnail_url"):
+            if info.get("thumbnail_url") and not book_list.thumbnail_url:
                 book_list.thumbnail_url = info["thumbnail_url"]
                 update_fields.append("thumbnail_url")
-            if info.get("description"):
+            if info.get("description") and not book_list.description:
                 book_list.description = info["description"]
                 update_fields.append("description")
-            if info.get("isbn"):
+            if info.get("isbn") and not book_list.isbn:
                 book_list.isbn = info["isbn"]
                 update_fields.append("isbn")
             if info.get("published_at") and not book_list.published_at:
