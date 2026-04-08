@@ -43,7 +43,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--shadow-sm);
-    overflow: hidden;
+    overflow-x: auto;
   }
   .manage-table {
     width: 100%;
@@ -70,10 +70,53 @@
   .manage-table tbody tr:hover { background: var(--primary-light); }
 
   .td-code { font-size: 0.78rem; color: var(--text-muted); font-weight: 600; white-space: nowrap; }
-  .td-title { font-weight: 600; max-width: 280px; }
-  .td-title a { color: var(--text); transition: color .2s; }
+
+  /* 도서명: 넓게 고정, 2줄 넘으면 말줄임 */
+  .td-title { font-weight: 600; width: 300px; max-width: 300px; }
+  .td-title a {
+    color: var(--text);
+    transition: color .2s;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
   .td-title a:hover { color: var(--primary); }
-  .td-author, .td-publisher { color: var(--text-sub); white-space: nowrap; }
+
+  /* 저자·출판사: 동일 너비, 저자는 8글자 기준 말줄임 */
+  .td-author, .td-publisher { color: var(--text-sub); width: 90px; max-width: 90px; }
+  .td-author span {
+    display: block;
+    max-width: 8em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .td-publisher { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* 수집 여부 배지 */
+  .collect-badges { display: flex; flex-direction: column; gap: 3px; }
+  .collect-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 10px;
+    white-space: nowrap;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-muted);
+  }
+  .collect-badge--ok {
+    background: #dcfce7;
+    color: #16a34a;
+    border-color: #86efac;
+  }
+  .collect-badge--ok::before { content: "✓ "; }
+  .collect-badge--no::before { content: "✗ "; }
+
   .td-inactive { color: var(--text-muted); font-size: 0.78rem; }
 
   .action-group { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
@@ -159,6 +202,16 @@
 <!-- 도서 테이블 -->
 <div class="manage-table-wrap">
   <table class="manage-table">
+    <colgroup>
+      <col style="width:90px">   <!-- 코드 -->
+      <col style="width:300px">  <!-- 도서명 -->
+      <col style="width:90px">   <!-- 저자 -->
+      <col style="width:90px">   <!-- 출판사 -->
+      <col style="width:72px">   <!-- 난이도 -->
+      <col style="width:80px">   <!-- 수집 -->
+      <col style="width:60px">   <!-- 상태 -->
+      <col>                      <!-- 작업 -->
+    </colgroup>
     <thead>
       <tr>
         <th>코드</th>
@@ -166,6 +219,7 @@
         <th>저자</th>
         <th>출판사</th>
         <th>난이도</th>
+        <th>수집</th>
         <th>상태</th>
         <th>작업</th>
       </tr>
@@ -177,7 +231,9 @@
         <td class="td-title">
           <a href="{% url 'books:detail' book.pk %}">{{ book.book_list.title }}</a>
         </td>
-        <td class="td-author">{{ book.book_list.author.name }}</td>
+        <td class="td-author">
+          <span title="{{ book.book_list.author.name }}">{{ book.book_list.author.name }}</span>
+        </td>
         <td class="td-publisher">{{ book.book_list.publisher.name }}</td>
         <td>
           {% if book.book_list.difficulty %}
@@ -185,6 +241,12 @@
           {% else %}
             <span class="td-inactive">미분류</span>
           {% endif %}
+        </td>
+        <td>
+          <div class="collect-badges">
+            <span class="collect-badge {% if book.book_list.thumbnail_url %}collect-badge--ok{% else %}collect-badge--no{% endif %}">이미지</span>
+            <span class="collect-badge {% if book.book_list.description %}collect-badge--ok{% else %}collect-badge--no{% endif %}">소개</span>
+          </div>
         </td>
         <td>
           {% if book.is_active %}
@@ -206,7 +268,7 @@
       </tr>
       {% empty %}
       <tr class="empty-row">
-        <td colspan="7">등록된 도서가 없습니다.</td>
+        <td colspan="8">등록된 도서가 없습니다.</td>
       </tr>
       {% endfor %}
     </tbody>

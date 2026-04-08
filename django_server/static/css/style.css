@@ -196,7 +196,7 @@ button { cursor: pointer; font-family: inherit; }
 .search-box {
   position: relative;
   flex: 1;
-  min-width: 200px;
+  min-width: 260px;
 }
 
 /* 난이도·카테고리·버튼을 하나의 묶음으로 유지 */
@@ -239,6 +239,7 @@ button { cursor: pointer; font-family: inherit; }
   cursor: pointer;
   outline: none;
   transition: border-color var(--transition);
+  width: 130px;   /* 카테고리 기준 고정 너비 — 난이도·카테고리 동일 크기 */
 }
 .filter-select:focus { border-color: var(--primary); }
 
