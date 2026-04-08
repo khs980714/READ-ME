@@ -1,3 +1,6 @@
+import logging
+import threading
+
 from django.contrib import messages
 from django.db import IntegrityError
 from django.shortcuts import get_object_or_404, redirect, render
@@ -5,6 +8,8 @@ from django.db.models import Q
 from django.views.decorators.http import require_POST
 
 from .models import Author, Book, BookList, Category, Publisher
+
+logger = logging.getLogger(__name__)
 
 
 def _staff_required(view_func):
@@ -182,6 +187,10 @@ def book_edit(request, pk):
             error = "도서명, 저자, 출판사는 필수 항목입니다."
         else:
             try:
+                # 변경 전 값 스냅샷 — 임베딩 재생성 여부 판단용
+                prev_title       = book_list.title
+                prev_description = book_list.description
+
                 author, _ = Author.objects.get_or_create(name=author_name)
                 publisher, _ = Publisher.objects.get_or_create(name=publisher_name)
                 book_list.title = title
@@ -197,7 +206,21 @@ def book_edit(request, pk):
                 book_list.categories.set(Category.objects.filter(id__in=category_ids))
                 book.is_active = is_active
                 book.save()
-                messages.success(request, f"도서 [{book.book_code}] {title} 이(가) 수정되었습니다.")
+
+                # 제목 또는 설명이 바뀌고 설명이 있으면 임베딩 재생성
+                needs_reembed = (
+                    (title != prev_title or description != prev_description)
+                    and bool(description)
+                )
+                if needs_reembed:
+                    _schedule_embedding_refresh(book_list.pk)
+                    messages.success(
+                        request,
+                        f"도서 [{book.book_code}] {title} 이(가) 수정되었습니다. "
+                        "임베딩 재생성이 백그라운드에서 진행됩니다.",
+                    )
+                else:
+                    messages.success(request, f"도서 [{book.book_code}] {title} 이(가) 수정되었습니다.")
                 return redirect("books:manage")
             except Exception as e:
                 error = str(e)
@@ -213,6 +236,20 @@ def book_edit(request, pk):
         "selected_category_ids": selected_category_ids,
         "error": error,
     })
+
+
+def _schedule_embedding_refresh(book_list_pk: int) -> None:
+    """임베딩 재생성을 백그라운드 스레드로 예약합니다."""
+    def _run():
+        try:
+            from .models import BookList
+            from .services import refresh_embedding
+            bl = BookList.objects.get(pk=book_list_pk)
+            refresh_embedding(bl)
+        except Exception as exc:
+            logger.error("임베딩 재생성 오류 (book_list_pk=%s): %s", book_list_pk, exc)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 @_staff_required

@@ -146,7 +146,31 @@
     <p class="stat-label">미수집 도서 (설명 없음)</p>
     <p class="stat-value">{{ pending }}</p>
   </div>
+  <div class="stat-card">
+    <p class="stat-label">임베딩 누락 도서 (설명 있음)</p>
+    <p class="stat-value" style="color:{% if missing_embed %}#d97706{% else %}var(--primary){% endif %}">{{ missing_embed }}</p>
+  </div>
 </div>
+
+<!-- ── 임베딩 누락 도서 일괄 처리 ── -->
+{% if missing_embed %}
+<div class="pipeline-card">
+  <h2>임베딩 누락 도서 일괄 처리</h2>
+  <p style="font-size:0.88rem;color:var(--text-sub);margin-bottom:16px;">
+    도서 관리 페이지에서 직접 입력된 설명이 있으나 임베딩이 생성되지 않은
+    <strong>{{ missing_embed }}권</strong>이 있습니다.
+    아래 버튼을 눌러 백그라운드에서 임베딩을 생성합니다.
+  </p>
+  <button class="btn-primary" id="btnEmbedMissing">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+      <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+    </svg>
+    임베딩 일괄 생성 ({{ missing_embed }}권)
+  </button>
+  <p class="progress-current" id="embedStatus" style="margin-top:12px;"></p>
+</div>
+{% endif %}
 
 <!-- ── 파이프라인 실행 ── -->
 <div class="pipeline-card">
@@ -183,6 +207,28 @@
 
 {% block extra_js %}
 <script>
+  const EMBED_MISSING_URL = "{% url 'pipeline:embed_missing' %}";
+  const embedBtn    = document.getElementById("btnEmbedMissing");
+  const embedStatus = document.getElementById("embedStatus");
+
+  if (embedBtn) {
+    embedBtn.addEventListener("click", async () => {
+      embedBtn.disabled = true;
+      embedStatus.textContent = "요청 중...";
+      try {
+        const res = await fetch(EMBED_MISSING_URL, {
+          method: "POST",
+          headers: { "X-CSRFToken": CSRF_TOKEN },
+        });
+        const data = await res.json();
+        embedStatus.textContent = data.message;
+      } catch (e) {
+        embedStatus.textContent = "오류: " + e.message;
+        embedBtn.disabled = false;
+      }
+    });
+  }
+
   const RUN_URL = "{% url 'pipeline:run' %}";
   const STREAM_BASE = "/pipeline/stream/";
   const CSRF_TOKEN = "{{ csrf_token }}";

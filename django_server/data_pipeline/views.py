@@ -33,11 +33,21 @@ def _staff_required(view_func):
 @_staff_required
 def pipeline_page(request):
     from books.models import Book, BookList
+    from books.models import BookEmbedding
     total_books = Book.objects.filter(is_active=True).count()
     pending = BookList.objects.filter(description="").count()
+    # description은 있으나 embedding이 없는 도서 (임베딩 누락)
+    embedded_ids = BookEmbedding.objects.values_list("book_list_id", flat=True)
+    missing_embed = (
+        BookList.objects
+        .exclude(description="")
+        .exclude(pk__in=embedded_ids)
+        .count()
+    )
     return render(request, "data_pipeline/index.html", {
         "total_books": total_books,
         "pending": pending,
+        "missing_embed": missing_embed,
     })
 
 
@@ -122,6 +132,41 @@ def _pipeline_worker(job_id: str, q: Queue):
     finally:
         q.put(None)  # sentinel — SSE 종료
         _running.clear()
+
+
+@_staff_required
+@require_POST
+def run_embed_missing(request):
+    """description은 있으나 embedding이 누락된 BookList를 일괄 재생성."""
+    from books.models import BookEmbedding, BookList
+    from books.services import refresh_embedding
+
+    embedded_ids = BookEmbedding.objects.values_list("book_list_id", flat=True)
+    targets = list(
+        BookList.objects
+        .exclude(description="")
+        .exclude(pk__in=embedded_ids)
+    )
+
+    if not targets:
+        return JsonResponse({"message": "임베딩 누락 도서가 없습니다.", "count": 0})
+
+    def _worker():
+        ok = err = 0
+        for bl in targets:
+            try:
+                refresh_embedding(bl)
+                ok += 1
+            except Exception:
+                err += 1
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+
+    return JsonResponse({
+        "message": f"{len(targets)}권의 임베딩 재생성을 시작했습니다.",
+        "count": len(targets),
+    })
 
 
 def pipeline_stream(request, job_id: str):

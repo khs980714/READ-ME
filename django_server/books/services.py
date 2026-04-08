@@ -204,3 +204,16 @@ def run_book_pipeline(book, progress_callback=None) -> None:
         generate_embedding(book_list.pk, book_list.title, book_list.description)
     else:
         _log("임베딩 이미 존재 — 건너뜀")
+
+
+def refresh_embedding(book_list) -> bool:
+    """
+    도서 설명(description)이 직접 입력·수정된 경우 임베딩을 강제 재생성합니다.
+    run_book_pipeline과 달리 기존 embedding 존재 여부와 관계없이 항상 재생성합니다.
+    description이 비어있으면 실행하지 않습니다.
+    """
+    if not book_list.description:
+        logger.info("임베딩 재생성 생략 — description 없음 (book_list_id=%s)", book_list.pk)
+        return False
+    logger.info("임베딩 재생성 시작 (book_list_id=%s)", book_list.pk)
+    return generate_embedding(book_list.pk, book_list.title, book_list.description)
