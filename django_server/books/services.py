@@ -189,13 +189,16 @@ def run_book_pipeline(book, progress_callback=None) -> None:
         _log("리뷰 스크래핑 중...")
         reviews = scrape_reviews(book_list.title)
 
-    # 3) 난이도 분류 — difficulty가 없을 때만 실행
-    if not book_list.difficulty:
+    # 3) 난이도 분류 — difficulty가 없고 description이 있을 때만 실행
+    #    description 없이 제목만으로 분류하면 결과가 부정확하므로 건너뜀
+    if not book_list.difficulty and book_list.description:
         _log("난이도 분류 중...")
         difficulty = classify_difficulty(book_list.title, book_list.description, reviews)
         if difficulty and difficulty in ("입문", "초급", "중급", "고급"):
             book_list.difficulty = difficulty
             update_fields.append("difficulty")
+    elif not book_list.difficulty and not book_list.description:
+        _log("난이도 분류 생략 — description 없음")
 
     if update_fields:
         book_list.save(update_fields=update_fields)
