@@ -71,8 +71,8 @@
 
   .td-code { font-size: 0.78rem; color: var(--text-muted); font-weight: 600; white-space: nowrap; }
 
-  /* 도서명: 넓게 고정, 2줄 넘으면 말줄임 */
-  .td-title { font-weight: 600; width: 360px; max-width: 360px; }
+  /* 도서명: 남은 공간을 모두 차지, 테이블 너비에 따라 자동 조절 */
+  .td-title { font-weight: 600; width: auto; min-width: 160px; }
   .td-title a {
     color: var(--text);
     transition: color .2s;
@@ -119,11 +119,11 @@
 
   .td-inactive { color: var(--text-muted); font-size: 0.78rem; }
 
-  .action-group { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+  .action-group { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
   .btn-table-edit {
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: 4px;
+    justify-content: center;
     padding: 5px 12px;
     background: var(--primary-light);
     color: var(--primary);
@@ -136,9 +136,9 @@
   }
   .btn-table-edit:hover { background: #e0d8f8; border-color: var(--primary); }
   .btn-table-delete {
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: 4px;
+    justify-content: center;
     padding: 5px 10px;
     background: #fee2e2;
     color: #dc2626;
@@ -204,7 +204,7 @@
   <table class="manage-table">
     <colgroup>
       <col style="width:90px">   <!-- 코드 -->
-      <col style="width:360px">  <!-- 도서명 -->
+      <col>                      <!-- 도서명: 나머지 공간 -->
       <col style="width:117px">  <!-- 저자 -->
       <col style="width:117px">  <!-- 출판사 -->
       <col style="width:72px">   <!-- 난이도 -->
@@ -258,7 +258,7 @@
         <td>
           <div class="action-group">
             <a href="{% url 'books:edit' book.pk %}" class="btn-table-edit">수정</a>
-            <form method="post" action="{% url 'books:delete' book.pk %}"
+            <form method="post" action="{% url 'books:delete' book.pk %}" style="display:contents;"
                   onsubmit="return confirm('도서 [{{ book.book_code }}] {{ book.book_list.title }}을(를) 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.')">
               {% csrf_token %}
               <button type="submit" class="btn-table-delete">삭제</button>
