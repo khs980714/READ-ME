@@ -69,7 +69,7 @@ def _decode(token: str, expected_type: str) -> dict | None:
         return None
 
 
-# ── 쿠키 세터 헬퍼 ───────────────────────────────────────────
+# ── 쿠키 세터 / 삭제 헬퍼 ────────────────────────────────────
 
 def _set_access_cookie(response, token: str) -> None:
     response.set_cookie(
@@ -93,6 +93,27 @@ def _set_refresh_cookie(response, token: str) -> None:
         secure=not settings.DEBUG,
         path="/",
     )
+
+
+def clear_jwt_cookies(response) -> None:
+    """로그인 시와 동일한 속성으로 쿠키를 삭제해야 브라우저가 확실히 제거합니다."""
+    for name in (ACCESS_COOKIE, REFRESH_COOKIE):
+        response.set_cookie(
+            name,
+            value="",
+            max_age=0,
+            expires="Thu, 01 Jan 1970 00:00:00 GMT",
+            path="/",
+            httponly=True,
+            samesite="Lax",
+            secure=not settings.DEBUG,
+        )
+
+
+def _is_clearing_cookies(response) -> bool:
+    """응답이 JWT 쿠키를 삭제하는 중인지 확인 (로그아웃 감지용)."""
+    cookie = response.cookies.get(ACCESS_COOKIE)
+    return cookie is not None and not cookie.value
 
 
 # ── 미들웨어 ─────────────────────────────────────────────────
@@ -134,14 +155,15 @@ class JWTAuthMiddleware:
 
         response = self.get_response(request)
 
-        if jwt_user is None:
+        # 인증된 사용자가 없거나, 로그아웃 응답이면 토큰 갱신 생략
+        if jwt_user is None or _is_clearing_cookies(response):
             return response
 
         now = datetime.now(tz=timezone.utc)
 
         # Access token 슬라이딩 갱신: 남은 수명 < 1/3 이거나 refresh로 인증된 경우
         access_token = request.COOKIES.get(ACCESS_COOKIE)
-        needs_new_access = refresh_ok  # refresh로 인증됐으면 무조건 새 access 발급
+        needs_new_access = refresh_ok
 
         if not needs_new_access and access_token:
             payload = _decode(access_token, "access")

@@ -8,6 +8,7 @@ from django.views.decorators.http import require_POST
 from .middleware import (
     ACCESS_COOKIE,
     REFRESH_COOKIE,
+    clear_jwt_cookies,
     create_access_token,
     create_refresh_token,
     _set_access_cookie,
@@ -41,8 +42,13 @@ def login_page(request):
 
 @require_POST
 def logout_view(request):
-    auth_logout(request)
+    # Django 세션 제거 (Admin 세션 병행 사용 시에도 안전하게 처리)
+    try:
+        auth_logout(request)
+    except Exception:
+        pass
+
     response = HttpResponseRedirect(reverse("books:list"))
-    response.delete_cookie(ACCESS_COOKIE,  path="/")
-    response.delete_cookie(REFRESH_COOKIE, path="/")
+    # 로그인 시와 동일한 속성으로 삭제해야 브라우저가 확실히 제거
+    clear_jwt_cookies(response)
     return response
