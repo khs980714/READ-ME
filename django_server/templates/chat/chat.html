@@ -3,6 +3,8 @@
 
 {% block title %}AI 도서 추천 — READ:ME{% endblock %}
 
+{% block body_class %}chat-page{% endblock %}
+
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/chat.css' %}">
 {% endblock %}
@@ -14,7 +16,7 @@
   <aside class="chat-sidebar">
     <div class="sidebar-header">
       <h2>AI 도서 추천</h2>
-      <p>궁금한 것을 물어보세요!</p>
+      <p>도서와 관련된 질문을 해주세요!</p>
     </div>
     <ul class="guide-list">
       <li>
@@ -39,7 +41,10 @@
         </div>
       </li>
     </ul>
-    <button class="btn-ghost btn-new-chat" id="btnNewChat">새 대화 시작</button>
+    <div class="sidebar-actions">
+      <button class="btn-ghost btn-new-chat" id="btnNewChat">새 대화 시작</button>
+      <button class="btn-ghost btn-reset-chat" id="btnResetChat">대화 초기화</button>
+    </div>
   </aside>
 
   <!-- ── 채팅 영역 ─────────────────────────────────────────── -->
@@ -50,8 +55,8 @@
         <div class="msg-avatar">AI</div>
         <div class="msg-body">
           <div class="msg-bubble">
-            안녕하세요! 저는 IT·개발 도서 추천 AI입니다.<br>
-            학습 로드맵, 수준별 추천, 도서 정보 등 무엇이든 물어보세요 😊
+            안녕하세요! 수강생님<br>
+            기본적인 도서 질문, 주제 로드맵, 수준 별 도서 질문과 같은 도서와 연관된 질문을 해주세요.
           </div>
         </div>
       </div>

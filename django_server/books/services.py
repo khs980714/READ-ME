@@ -1,7 +1,8 @@
 """
 도서 데이터 수집 서비스
-- Naver Book Search API: 썸네일, 소개, ISBN
-- 리뷰 스크래핑: 도서 리뷰 텍스트
+- 알라딘 Open API (TTB): 썸네일, 소개, ISBN, 목차 (1차)
+- YES24 스크래핑: 소개, 목차 (2차 fallback)
+- 교보문고 스크래핑: 소개, 목차 (3차 fallback)
 - FastAPI 모델 서버: 난이도 분류, 임베딩 생성
 중복 방지: BookList 단위로 데이터 수집 여부를 판단하여 불필요한 API 호출을 방지합니다.
 """
@@ -9,6 +10,7 @@
 import logging
 import re
 import time
+import urllib.parse
 
 import httpx
 import requests
@@ -17,21 +19,249 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
+# ── 알라딘 Open API ───────────────────────────────────────────
+
+ALADIN_SEARCH_URL = "http://www.aladin.co.kr/ttb/api/ItemSearch.aspx"
+ALADIN_LOOKUP_URL = "http://www.aladin.co.kr/ttb/api/ItemLookUp.aspx"
+
+
+def fetch_aladin_book_info(title: str) -> dict | None:
+    """
+    알라딘 Open API(TTB)로 도서 정보 조회.
+    thumbnail, description, isbn, toc 반환.
+    ALADIN_TTB_KEY 미설정 시 None 반환.
+    """
+    ttb_key = getattr(settings, "ALADIN_TTB_KEY", "")
+    if not ttb_key:
+        return None
+    try:
+        # 1단계: 도서 검색
+        resp = requests.get(
+            ALADIN_SEARCH_URL,
+            params={
+                "ttbkey": ttb_key,
+                "Query": _normalize_title(title),
+                "QueryType": "Title",
+                "MaxResults": 1,
+                "SearchTarget": "Book",
+                "output": "js",
+                "Version": "20131101",
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        items = data.get("item", [])
+        if not items:
+            return None
+        item = items[0]
+
+        result: dict = {
+            "thumbnail_url": item.get("cover", ""),
+            "description":   item.get("description", "")[:2000],
+            "isbn":          item.get("isbn13", ""),
+        }
+
+        # 2단계: ItemId로 목차(toc) 조회
+        item_id = item.get("itemId")
+        if item_id:
+            try:
+                lookup_resp = requests.get(
+                    ALADIN_LOOKUP_URL,
+                    params={
+                        "ttbkey": ttb_key,
+                        "itemIdType": "ItemId",
+                        "ItemId": item_id,
+                        "output": "js",
+                        "Version": "20131101",
+                        "OptResult": "toc",
+                    },
+                    timeout=10,
+                )
+                lookup_resp.raise_for_status()
+                lookup_data = lookup_resp.json()
+                lookup_items = lookup_data.get("item", [])
+                if lookup_items:
+                    sub_info = lookup_items[0].get("subInfo", {})
+                    toc = sub_info.get("toc", "")
+                    if toc:
+                        result["toc"] = toc[:3000]
+            except Exception as exc:
+                logger.warning("알라딘 TOC 조회 실패 (%s): %s", title, exc)
+
+        return result if any(v for v in result.values()) else None
+    except Exception as exc:
+        logger.warning("알라딘 API 실패 (%s): %s", title, exc)
+        return None
+
+
+# ── YES24 스크래핑 ────────────────────────────────────────────
+
+def fetch_yes24_book_info(title: str) -> dict | None:
+    """YES24 검색 결과에서 도서 설명 + 목차 스크래핑."""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        search_url = (
+            "https://www.yes24.com/Product/Search"
+            f"?query={urllib.parse.quote(_normalize_title(title))}&domain=BOOK"
+        )
+        resp = requests.get(search_url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "lxml")
+
+        link_tag = soup.select_one(".itemName a")
+        if not link_tag:
+            return None
+        product_url = "https://www.yes24.com" + link_tag["href"]
+
+        time.sleep(0.5)
+        resp2 = requests.get(product_url, headers=headers, timeout=10)
+        soup2 = BeautifulSoup(resp2.text, "lxml")
+
+        result: dict = {}
+
+        # 도서 소개
+        intro_tag = soup2.select_one("#infoset_introduce .infoSetCont_wrap")
+        if not intro_tag:
+            intro_tag = soup2.select_one(".Wrrapper.infoSetCont_wrap")
+        if intro_tag:
+            text = intro_tag.get_text(separator="\n", strip=True)
+            if text:
+                result["description"] = text[:2000]
+
+        # 목차
+        toc_tag = soup2.select_one("#infoset_toc .infoSetCont_wrap")
+        if not toc_tag:
+            toc_tag = soup2.select_one("#infoset_toc")
+        if toc_tag:
+            text = toc_tag.get_text(separator="\n", strip=True)
+            if text:
+                result["toc"] = text[:3000]
+
+        # 썸네일
+        thumb_tag = soup2.select_one(".gd_img img")
+        if thumb_tag and thumb_tag.get("src"):
+            result["thumbnail_url"] = thumb_tag["src"]
+
+        return result if result else None
+    except Exception as exc:
+        logger.warning("YES24 수집 실패 (%s): %s", title, exc)
+        return None
+
+
+# ── 교보문고 스크래핑 ─────────────────────────────────────────
+
+def fetch_kyobo_book_info(title: str) -> dict | None:
+    """교보문고 검색 결과에서 도서 설명 + 목차 스크래핑."""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        search_url = (
+            "https://search.kyobobook.co.kr/search"
+            f"?keyword={urllib.parse.quote(_normalize_title(title))}&target=BOOK"
+        )
+        resp = requests.get(search_url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "lxml")
+
+        link_tag = soup.select_one(".prod_name a")
+        if not link_tag:
+            return None
+        product_url = link_tag.get("href", "")
+        if not product_url.startswith("http"):
+            product_url = "https://product.kyobobook.co.kr" + product_url
+
+        time.sleep(0.5)
+        resp2 = requests.get(product_url, headers=headers, timeout=10)
+        soup2 = BeautifulSoup(resp2.text, "lxml")
+
+        result: dict = {}
+
+        # 도서 소개
+        intro_tag = soup2.select_one(".intro_bottom")
+        if not intro_tag:
+            intro_tag = soup2.select_one("[data-tab-cont='introduce']")
+        if intro_tag:
+            text = intro_tag.get_text(separator="\n", strip=True)
+            if text:
+                result["description"] = text[:2000]
+
+        # 목차
+        toc_tag = soup2.select_one("[data-tab-cont='contents']")
+        if not toc_tag:
+            toc_tag = soup2.select_one(".book_contents_inner")
+        if toc_tag:
+            text = toc_tag.get_text(separator="\n", strip=True)
+            if text:
+                result["toc"] = text[:3000]
+
+        return result if result else None
+    except Exception as exc:
+        logger.warning("교보문고 수집 실패 (%s): %s", title, exc)
+        return None
+
+
+# ── 멀티소스 통합 수집 ────────────────────────────────────────
+
+def fetch_book_info_with_fallback(title: str, author: str = "") -> dict:
+    """
+    도서 정보 수집 — 우선순위: 알라딘 API → YES24 → 교보문고
+    각 소스에서 비어있는 필드를 채워가며 수집합니다.
+    force=True 이면 기존 데이터를 무시하고 새로 수집합니다.
+    """
+    collected: dict = {"thumbnail_url": "", "description": "", "isbn": "", "toc": ""}
+
+    # 1차: 알라딘 API
+    aladin_info = fetch_aladin_book_info(title)
+    if aladin_info:
+        for key in ("thumbnail_url", "description", "isbn", "toc"):
+            if aladin_info.get(key):
+                collected[key] = aladin_info[key]
+
+    # 2차: YES24 (description 또는 toc 없을 때)
+    if not collected["description"] or not collected["toc"]:
+        yes24_info = fetch_yes24_book_info(title)
+        if yes24_info:
+            if yes24_info.get("description") and not collected["description"]:
+                collected["description"] = yes24_info["description"]
+            if yes24_info.get("toc") and not collected["toc"]:
+                collected["toc"] = yes24_info["toc"]
+            if yes24_info.get("thumbnail_url") and not collected["thumbnail_url"]:
+                collected["thumbnail_url"] = yes24_info["thumbnail_url"]
+
+    # 3차: 교보문고
+    if not collected["description"] or not collected["toc"]:
+        kyobo_info = fetch_kyobo_book_info(title)
+        if kyobo_info:
+            if kyobo_info.get("description") and not collected["description"]:
+                collected["description"] = kyobo_info["description"]
+            if kyobo_info.get("toc") and not collected["toc"]:
+                collected["toc"] = kyobo_info["toc"]
+
+    return collected
+
+
+# 내부 backward-compat alias
+_fetch_book_info_with_fallback = fetch_book_info_with_fallback
+
+
+# ── Naver Book Search API (도서 추가 팝오버 검색용) ───────────
+
 NAVER_BOOK_URL = "https://openapi.naver.com/v1/search/book.json"
-NAVER_HEADERS = {
-    "X-Naver-Client-Id": settings.NAVER_CLIENT_ID,
-    "X-Naver-Client-Secret": settings.NAVER_CLIENT_SECRET,
-}
 
 
-# ── Naver Book Search API ─────────────────────────────────────
+def _naver_headers():
+    return {
+        "X-Naver-Client-Id":     getattr(settings, "NAVER_CLIENT_ID", ""),
+        "X-Naver-Client-Secret": getattr(settings, "NAVER_CLIENT_SECRET", ""),
+    }
+
 
 def search_naver_books(query: str, display: int = 5) -> list[dict]:
     """Naver Book Search API — 여러 결과 반환 (도서 추가 검색 팝오버용)."""
     try:
         resp = requests.get(
             NAVER_BOOK_URL,
-            headers=NAVER_HEADERS,
+            headers=_naver_headers(),
             params={"query": query, "display": display},
             timeout=10,
         )
@@ -39,10 +269,8 @@ def search_naver_books(query: str, display: int = 5) -> list[dict]:
         items = resp.json().get("items", [])
         results = []
         for item in items:
-            # 저자: Naver는 '^' 로 다중 저자 구분
             raw_author = _strip_html(item.get("author", ""))
             author_str = raw_author.replace("^", ", ")
-            pub_date = str(_parse_pubdate(item.get("pubdate", "")) or "")
             results.append({
                 "title":         _strip_html(item.get("title", "")),
                 "author":        author_str,
@@ -50,7 +278,6 @@ def search_naver_books(query: str, display: int = 5) -> list[dict]:
                 "thumbnail_url": item.get("image", ""),
                 "description":   _strip_html(item.get("description", "")),
                 "isbn":          item.get("isbn", "").split()[-1] if item.get("isbn") else "",
-                "published_at":  pub_date,
             })
         return results
     except Exception as exc:
@@ -58,82 +285,19 @@ def search_naver_books(query: str, display: int = 5) -> list[dict]:
         return []
 
 
-def fetch_naver_book_info(title: str, author: str = "") -> dict | None:
-    """Naver Book Search API로 도서 정보 조회."""
-    query = f"{_normalize_title(title)} {author}".strip()
-    try:
-        resp = requests.get(
-            NAVER_BOOK_URL,
-            headers=NAVER_HEADERS,
-            params={"query": query, "display": 1},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        items = resp.json().get("items", [])
-        if not items:
-            return None
-        item = items[0]
-        return {
-            "thumbnail_url": item.get("image", ""),
-            "description": _strip_html(item.get("description", "")),
-            "isbn": item.get("isbn", "").split()[-1] if item.get("isbn") else "",
-            "published_at": _parse_pubdate(item.get("pubdate", "")),
-        }
-    except Exception as exc:
-        logger.warning("Naver API 오류 (%s): %s", title, exc)
-        return None
-
+# ── 유틸 ─────────────────────────────────────────────────────
 
 def _strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text).strip()
 
 
 def _normalize_title(title: str) -> str:
-    """검색용 제목 정규화 — '(개정판)', '(2판)', '[개정증보판]' 등 부제 제거."""
-    # 괄호·대괄호 안 '판', '개정', '증보', '완전', '전면', '개편' 등 판형 표현 제거
-    normalized = re.sub(r"[\(\[（［][^\)\]）］]*?(개정|증보|완전|전면|개편|판|edition)[^\)\]）］]*?[\)\]）］]", "", title, flags=re.IGNORECASE)
+    """검색용 제목 정규화 — '(개정판)', '(2판)' 등 판형 표현 제거."""
+    normalized = re.sub(
+        r"[\(\[（［][^\)\]）］]*?(개정|증보|완전|전면|개편|판|edition)[^\)\]）］]*?[\)\]）］]",
+        "", title, flags=re.IGNORECASE,
+    )
     return normalized.strip()
-
-
-def _parse_pubdate(pubdate: str):
-    """'20240101' → date object."""
-    from datetime import date
-    if len(pubdate) == 8 and pubdate.isdigit():
-        try:
-            return date(int(pubdate[:4]), int(pubdate[4:6]), int(pubdate[6:8]))
-        except ValueError:
-            pass
-    return None
-
-
-# ── 리뷰 스크래핑 (예스24) ───────────────────────────────────
-
-def scrape_reviews(title: str, max_reviews: int = 10) -> list[str]:
-    """예스24 검색 결과 페이지에서 독자 리뷰를 스크래핑."""
-    reviews = []
-    try:
-        search_url = f"https://www.yes24.com/Product/Search?query={requests.utils.quote(_normalize_title(title))}&domain=BOOK"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        resp = requests.get(search_url, headers=headers, timeout=10)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "lxml")
-
-        link_tag = soup.select_one(".itemName a")
-        if not link_tag:
-            return []
-        product_url = "https://www.yes24.com" + link_tag["href"]
-
-        time.sleep(0.5)
-        resp2 = requests.get(product_url, headers=headers, timeout=10)
-        soup2 = BeautifulSoup(resp2.text, "lxml")
-
-        for tag in soup2.select(".reviewInfoBot .txtReview")[:max_reviews]:
-            text = tag.get_text(strip=True)
-            if text:
-                reviews.append(text)
-    except Exception as exc:
-        logger.warning("리뷰 스크래핑 실패 (%s): %s", title, exc)
-    return reviews
 
 
 # ── FastAPI 모델 서버 호출 ────────────────────────────────────
@@ -173,11 +337,10 @@ def generate_embedding(book_list_id: int, title: str, description: str) -> bool:
 def run_book_pipeline(book, progress_callback=None) -> None:
     """
     도서 데이터 수집 파이프라인 (BookList 단위 중복 방지):
-    1. Naver API → description·isbn·thumbnail 중 하나라도 비어있으면 호출,
-                   이미 채워진 필드는 덮어쓰지 않음
-    2. 리뷰 스크래핑
-    3. LLM 난이도 분류 (difficulty 없을 때만)
-    4. 임베딩 생성 (embedding 없을 때만)
+    1. 알라딘 API → YES24 → 교보문고 순으로 fallback 수집
+       (description·isbn·thumbnail·toc 중 비어있는 필드만 채움)
+    2. LLM 난이도 분류 (difficulty 없을 때만, description 기반)
+    3. 임베딩 생성 (embedding 없을 때만)
     """
     from .models import BookEmbedding
 
@@ -191,41 +354,33 @@ def run_book_pipeline(book, progress_callback=None) -> None:
         else:
             logger.info(msg)
 
-    # 1) Naver API — 수집이 필요한 필드가 하나라도 비어있으면 호출
-    #    이미 입력된 필드(description 포함)는 덮어쓰지 않음
-    needs_naver = (
+    # 1) 수집이 필요한 필드가 하나라도 비어있으면 멀티소스 수집
+    needs_collect = (
         not book_list.description
         or not book_list.isbn
         or not book_list.thumbnail_url
+        or not book_list.toc
     )
-    if needs_naver:
-        _log("Naver API 조회 중...")
-        info = fetch_naver_book_info(book_list.title, author_name)
-        if info:
-            if info.get("thumbnail_url") and not book_list.thumbnail_url:
-                book_list.thumbnail_url = info["thumbnail_url"]
-                update_fields.append("thumbnail_url")
-            if info.get("description") and not book_list.description:
-                book_list.description = info["description"]
-                update_fields.append("description")
-            if info.get("isbn") and not book_list.isbn:
-                book_list.isbn = info["isbn"]
-                update_fields.append("isbn")
-            if info.get("published_at") and not book_list.published_at:
-                book_list.published_at = info["published_at"]
-                update_fields.append("published_at")
+    if needs_collect:
+        _log("도서 정보 수집 중 (알라딘 → YES24 → 교보문고)...")
+        info = fetch_book_info_with_fallback(book_list.title, author_name)
+        if info.get("thumbnail_url") and not book_list.thumbnail_url:
+            book_list.thumbnail_url = info["thumbnail_url"]
+            update_fields.append("thumbnail_url")
+        if info.get("description") and not book_list.description:
+            book_list.description = info["description"]
+            update_fields.append("description")
+        if info.get("isbn") and not book_list.isbn:
+            book_list.isbn = info["isbn"]
+            update_fields.append("isbn")
+        if info.get("toc") and not book_list.toc:
+            book_list.toc = info["toc"]
+            update_fields.append("toc")
 
-    # 2) 리뷰 스크래핑
-    reviews = []
-    if not book_list.difficulty:
-        _log("리뷰 스크래핑 중...")
-        reviews = scrape_reviews(book_list.title)
-
-    # 3) 난이도 분류 — difficulty가 없고 description이 있을 때만 실행
-    #    description 없이 제목만으로 분류하면 결과가 부정확하므로 건너뜀
+    # 2) 난이도 분류 — difficulty가 없고 description이 있을 때만 실행
     if not book_list.difficulty and book_list.description:
         _log("난이도 분류 중...")
-        difficulty = classify_difficulty(book_list.title, book_list.description, reviews)
+        difficulty = classify_difficulty(book_list.title, book_list.description, [])
         if difficulty and difficulty in ("입문", "초급", "중급", "고급"):
             book_list.difficulty = difficulty
             update_fields.append("difficulty")
@@ -235,25 +390,63 @@ def run_book_pipeline(book, progress_callback=None) -> None:
     if update_fields:
         book_list.save(update_fields=update_fields)
 
-    # 4) 임베딩 생성 — 이미 존재하면 건너뜀
+    # 3) 임베딩 생성 — 이미 존재하면 건너뜀
     try:
         embedding_exists = BookEmbedding.objects.filter(book_list=book_list).exists()
     except Exception:
         embedding_exists = False
 
-    if not embedding_exists:
+    if not embedding_exists and book_list.description:
         _log("임베딩 생성 중...")
         generate_embedding(book_list.pk, book_list.title, book_list.description)
     else:
         _log("임베딩 이미 존재 — 건너뜀")
 
 
+def collect_book_data(book_list, force: bool = False) -> dict:
+    """
+    개별 도서 데이터 수집 (force=True이면 기존 데이터 덮어쓰기).
+    반환: {"updated_fields": [...], "thumbnail": bool, "description": bool, "toc": bool, "difficulty": str}
+    """
+    update_fields = []
+    info = fetch_book_info_with_fallback(book_list.title, book_list.author.name)
+
+    if info.get("thumbnail_url") and (force or not book_list.thumbnail_url):
+        book_list.thumbnail_url = info["thumbnail_url"]
+        update_fields.append("thumbnail_url")
+    if info.get("description") and (force or not book_list.description):
+        book_list.description = info["description"]
+        update_fields.append("description")
+    if info.get("isbn") and (force or not book_list.isbn):
+        book_list.isbn = info["isbn"]
+        update_fields.append("isbn")
+    if info.get("toc") and (force or not book_list.toc):
+        book_list.toc = info["toc"]
+        update_fields.append("toc")
+
+    if update_fields:
+        book_list.save(update_fields=update_fields)
+
+    # 난이도 분류 (description 있을 때)
+    if book_list.description and (force or not book_list.difficulty):
+        difficulty = classify_difficulty(book_list.title, book_list.description, [])
+        if difficulty and difficulty in ("입문", "초급", "중급", "고급"):
+            book_list.difficulty = difficulty
+            book_list.save(update_fields=["difficulty"])
+            if "difficulty" not in update_fields:
+                update_fields.append("difficulty")
+
+    return {
+        "updated_fields": update_fields,
+        "thumbnail":    bool(book_list.thumbnail_url),
+        "description":  bool(book_list.description),
+        "toc":          bool(book_list.toc),
+        "difficulty":   book_list.difficulty,
+    }
+
+
 def refresh_embedding(book_list) -> bool:
-    """
-    도서 설명(description)이 직접 입력·수정된 경우 임베딩을 강제 재생성합니다.
-    run_book_pipeline과 달리 기존 embedding 존재 여부와 관계없이 항상 재생성합니다.
-    description이 비어있으면 실행하지 않습니다.
-    """
+    """임베딩 강제 재생성 (description 없으면 생략)."""
     if not book_list.description:
         logger.info("임베딩 재생성 생략 — description 없음 (book_list_id=%s)", book_list.pk)
         return False

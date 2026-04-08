@@ -424,19 +424,6 @@
                  value="{{ form_data.isbn|default:book_list.isbn|default:'' }}">
         </div>
 
-        <div class="form-group">
-          <label class="form-label" for="published_at">출판일</label>
-          <input class="form-input" type="date" id="published_at" name="published_at"
-                 value="{{ form_data.published_at|default:book_list.published_at|default:'' }}">
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="page_count">페이지 수</label>
-          <input class="form-input" type="number" id="page_count" name="page_count"
-                 placeholder="0" min="1"
-                 value="{{ form_data.page_count|default:book_list.page_count|default:'' }}">
-        </div>
-
         <div class="form-group form-col-full">
           <label class="form-label" for="thumbnail_url">썸네일 URL</label>
           <input class="form-input" type="url" id="thumbnail_url" name="thumbnail_url"
@@ -448,6 +435,12 @@
           <label class="form-label" for="description">도서 소개</label>
           <textarea class="form-textarea" id="description" name="description"
                     placeholder="도서 소개 내용을 입력하세요">{{ form_data.description|default:book_list.description|default:'' }}</textarea>
+        </div>
+
+        <div class="form-group form-col-full">
+          <label class="form-label" for="toc">목차</label>
+          <textarea class="form-textarea" id="toc" name="toc"
+                    placeholder="목차 내용을 입력하세요">{{ form_data.toc|default:book_list.toc|default:'' }}</textarea>
         </div>
       </div>
     </div>
@@ -592,9 +585,6 @@
     document.getElementById("thumbnail_url").value = item.thumbnail_url|| "";
     document.getElementById("description").value   = item.description  || "";
     document.getElementById("isbn").value          = item.isbn         || "";
-    if (item.published_at) {
-      document.getElementById("published_at").value = item.published_at;
-    }
     closePopover();
     banner.classList.add("show");
     bannerText.innerHTML = `<strong>${escHtml(item.title)}</strong> 정보가 폼에 입력되었습니다. 필요한 항목을 수정 후 저장하세요.`;
@@ -623,7 +613,7 @@
 
   // 배너 초기화
   bannerReset.addEventListener("click", () => {
-    ["title","author","publisher","thumbnail_url","description","isbn","published_at"].forEach(id => {
+    ["title","author","publisher","thumbnail_url","description","isbn"].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = "";
     });

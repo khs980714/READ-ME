@@ -49,29 +49,9 @@
         <dt>출판사</dt>
         <dd>{{ book.publisher.name }}</dd>
       </div>
-      {% if book.published_at %}
-      <div class="meta-row">
-        <dt>출판일</dt>
-        <dd>{{ book.published_at|date:"Y년 m월 d일" }}</dd>
-      </div>
-      {% endif %}
-      {% if book.isbn %}
-      <div class="meta-row">
-        <dt>ISBN</dt>
-        <dd>{{ book.isbn }}</dd>
-      </div>
-      {% endif %}
-      {% if book.page_count %}
-      <div class="meta-row">
-        <dt>페이지</dt>
-        <dd>{{ book.page_count }}p</dd>
-      </div>
-      {% endif %}
     </dl>
 
-    <div class="detail-actions">
-      <a href="{% url 'chat:page' %}" class="btn-primary">AI에게 추천 받기</a>
-    </div>
+
   </section>
 </div>
 
@@ -79,6 +59,13 @@
 <section class="detail-desc">
   <h2 class="section-title">도서 소개</h2>
   <div class="desc-body">{{ book.description|linebreaks }}</div>
+</section>
+{% endif %}
+
+{% if book.toc %}
+<section class="detail-desc">
+  <h2 class="section-title">목차</h2>
+  <div class="desc-body">{{ book.toc|linebreaks }}</div>
 </section>
 {% endif %}
 {% endblock %}

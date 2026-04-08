@@ -12,4 +12,5 @@ urlpatterns = [
     path("api/naver-search/", views.naver_search_api, name="naver_search"),
     path("manage/<int:pk>/edit/", views.book_edit, name="edit"),
     path("manage/<int:pk>/delete/", views.book_delete, name="delete"),
+    path("manage/<int:pk>/collect/", views.book_collect, name="collect"),
 ]

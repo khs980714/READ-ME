@@ -75,8 +75,7 @@ class BookList(models.Model):
     )
     isbn = models.CharField(max_length=20, blank=True, verbose_name="ISBN")
     thumbnail_url = models.URLField(max_length=500, blank=True, verbose_name="썸네일 URL")
-    published_at = models.DateField(null=True, blank=True, verbose_name="출판일")
-    page_count = models.PositiveIntegerField(null=True, blank=True, verbose_name="페이지 수")
+    toc = models.TextField(blank=True, verbose_name="목차")
     categories = models.ManyToManyField(
         Category,
         through="BookListCategory",
@@ -169,12 +168,8 @@ class Book(models.Model):
         return self.book_list.isbn
 
     @property
-    def published_at(self):
-        return self.book_list.published_at
-
-    @property
-    def page_count(self):
-        return self.book_list.page_count
+    def toc(self):
+        return self.book_list.toc
 
     @property
     def categories(self):

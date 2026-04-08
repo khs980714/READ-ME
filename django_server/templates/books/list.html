@@ -28,26 +28,25 @@
         {% endfor %}
       </select>
 
-      <select name="category" class="filter-select">
-        <option value="">카테고리 전체</option>
-        {% for cat in categories %}
-          <option value="{{ cat.id }}" {% if selected_category == cat.id|stringformat:"s" %}selected{% endif %}>{{ cat.name }}</option>
-        {% endfor %}
-      </select>
-
       <button type="submit" class="btn-primary">검색</button>
       <a href="{% url 'books:list' %}" class="btn-ghost">초기화</a>
     </div>
   </form>
 </div>
 
-<!-- ── 도서 카드 그리드 ───────────────────────────────────── -->
-<div class="book-count">
-  총 <strong>{{ books|length }}</strong>권
+<!-- ── 도서 목록 헤더 ─────────────────────────────────────── -->
+<div class="book-list-header">
+  <div class="book-count">총 <strong>{{ books|length }}</strong>권</div>
+  <div class="view-toggle" id="viewToggle">
+    <span class="view-label">보기 방식</span>
+    <button class="view-btn active" id="btnViewImage" data-view="image">이미지</button>
+    <button class="view-btn" id="btnViewList" data-view="list">리스트</button>
+  </div>
 </div>
 
 {% if books %}
-<div class="book-grid">
+<!-- 이미지 그리드 뷰 -->
+<div class="book-grid" id="bookGridView">
   {% for book in books %}
   <a href="{% url 'books:detail' book.pk %}" class="book-card">
     <div class="book-thumb">
@@ -76,6 +75,39 @@
   </a>
   {% endfor %}
 </div>
+
+<!-- 리스트 뷰 -->
+<div class="book-list-view" id="bookListView" style="display:none;">
+  {% for book in books %}
+  <a href="{% url 'books:detail' book.pk %}" class="book-list-item">
+    <div class="book-list-thumb">
+      {% if book.thumbnail_url %}
+        <img src="{{ book.thumbnail_url }}" alt="{{ book.title }}" loading="lazy">
+      {% else %}
+        <div class="book-thumb-placeholder">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M4 19.5A2.5 2.5 0 016.5 17H20"/>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>
+          </svg>
+        </div>
+      {% endif %}
+    </div>
+    <div class="book-list-info">
+      <div class="book-meta-top">
+        {% if book.difficulty %}
+          <span class="badge badge--{{ book.difficulty }}">{{ book.difficulty }}</span>
+        {% endif %}
+        <span class="book-code">{{ book.book_code }}</span>
+      </div>
+      <h3 class="book-title">{{ book.title }}</h3>
+      <p class="book-author">{{ book.get_author_display }} · {{ book.publisher.name }}</p>
+      {% if book.description %}
+        <p class="book-desc-preview">{{ book.description|truncatechars:120 }}</p>
+      {% endif %}
+    </div>
+  </a>
+  {% endfor %}
+</div>
 {% else %}
 <div class="empty-state">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -85,4 +117,37 @@
   <a href="{% url 'books:list' %}" class="btn-ghost">전체 목록 보기</a>
 </div>
 {% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  const btnImage = document.getElementById("btnViewImage");
+  const btnList  = document.getElementById("btnViewList");
+  const gridView = document.getElementById("bookGridView");
+  const listView = document.getElementById("bookListView");
+
+  const STORAGE_KEY = "readme_book_view";
+  const savedView = localStorage.getItem(STORAGE_KEY) || "image";
+
+  function setView(view) {
+    if (view === "list") {
+      gridView.style.display = "none";
+      listView.style.display = "block";
+      btnImage.classList.remove("active");
+      btnList.classList.add("active");
+    } else {
+      gridView.style.display = "";
+      listView.style.display = "none";
+      btnImage.classList.add("active");
+      btnList.classList.remove("active");
+    }
+    localStorage.setItem(STORAGE_KEY, view);
+  }
+
+  setView(savedView);
+
+  btnImage.addEventListener("click", () => setView("image"));
+  btnList.addEventListener("click",  () => setView("list"));
+</script>
 {% endblock %}

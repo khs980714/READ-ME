@@ -225,7 +225,7 @@ def run_classify(request):
 def _classify_worker(job_id: str, q: Queue, targets: list):
     _classify_running.set()
     try:
-        from books.services import classify_difficulty, scrape_reviews
+        from books.services import classify_difficulty
 
         total = len(targets)
         q.put({"type": "start", "total": total})
@@ -234,8 +234,7 @@ def _classify_worker(job_id: str, q: Queue, targets: list):
         for bl in targets:
             q.put({"type": "progress", "done": done, "total": total, "current": bl.title})
             try:
-                reviews = scrape_reviews(bl.title)
-                difficulty = classify_difficulty(bl.title, bl.description, reviews)
+                difficulty = classify_difficulty(bl.title, bl.description, [])
                 if difficulty and difficulty in ("입문", "초급", "중급", "고급"):
                     bl.difficulty = difficulty
                     bl.save(update_fields=["difficulty"])

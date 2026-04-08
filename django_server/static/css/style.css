@@ -103,6 +103,27 @@ button { cursor: pointer; font-family: inherit; }
 .nav-links a:hover { color: #fff; }
 .nav-links a.active { color: #fff; border-bottom-color: var(--primary); }
 
+/* navbar 로고 — 기본 숨김, chat-page에서만 표시 */
+.navbar-logo {
+  display: none;
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.5px;
+  flex-shrink: 0;
+  margin-right: 8px;
+}
+.navbar-logo span { color: var(--primary); }
+
+/* chat-page 전용 오버라이드 */
+.chat-page .topbar { display: none; }
+.chat-page .navbar { top: 0; }
+.chat-page .navbar-logo { display: flex; align-items: center; }
+.chat-page .nav-links { display: none; }
+.chat-page .admin-badge { display: none; }
+.chat-page .navbar-admin-btn { display: none; }
+.chat-page .navbar-logout-form { display: none; }
+
 .nav-right { display: flex; align-items: center; gap: 8px; }
 
 .admin-badge {
@@ -243,13 +264,106 @@ button { cursor: pointer; font-family: inherit; }
 }
 .filter-select:focus { border-color: var(--primary); }
 
-/* ── Book Count ──────────────────────────────────────────── */
+/* ── Book List Header (count + view toggle) ──────────────── */
+.book-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
 .book-count {
   font-size: 0.85rem;
   color: var(--text-sub);
-  margin-bottom: 16px;
 }
 .book-count strong { color: var(--primary); }
+
+.view-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.view-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+.view-btn {
+  padding: 5px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  color: var(--text-sub);
+  transition: border-color var(--transition), background var(--transition), color var(--transition);
+}
+.view-btn:hover { border-color: var(--primary); color: var(--primary); }
+.view-btn.active {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+/* ── Book List View ──────────────────────────────────────── */
+.book-list-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.book-list-item {
+  display: flex;
+  gap: 16px;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  transition: border-color var(--transition), box-shadow var(--transition);
+  cursor: pointer;
+}
+.book-list-item:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.book-list-thumb {
+  width: 56px;
+  height: 74px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--primary-light);
+}
+.book-list-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.book-list-thumb .book-thumb-placeholder {
+  width: 100%;
+  height: 100%;
+}
+.book-list-thumb .book-thumb-placeholder svg { width: 24px; height: 24px; }
+
+.book-list-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.book-desc-preview {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-top: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 
 /* ── Book Grid & Card ────────────────────────────────────── */
 .book-grid {

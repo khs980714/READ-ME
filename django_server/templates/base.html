@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="{% static 'css/style.css' %}">
   {% block extra_css %}{% endblock %}
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
 
   <!-- ── Top Bar ─────────────────────────────────────────── -->
   <header class="topbar">
@@ -21,6 +21,9 @@
   <!-- ── Nav Bar ─────────────────────────────────────────── -->
   <nav class="navbar">
     <div class="navbar-inner">
+      <!-- chat-page에서만 표시되는 로고 -->
+      <a href="{% url 'books:list' %}" class="navbar-logo">READ<span>:</span>ME</a>
+
       <ul class="nav-links">
         <li><a href="{% url 'books:list' %}" class="{% if request.resolver_match.app_name == 'books' and request.resolver_match.url_name == 'list' %}active{% endif %}">도서 목록</a></li>
         <li><a href="{% url 'chat:page' %}" class="{% if request.resolver_match.app_name == 'chat' %}active{% endif %}">AI 추천 검색</a></li>
@@ -32,13 +35,11 @@
       <div class="nav-right">
         {% if user.is_authenticated %}
           <span class="admin-badge">관리자</span>
-          <a href="{% url 'admin:index' %}" class="btn-nav">관리자 페이지</a>
-          <form method="post" action="{% url 'accounts:logout' %}" style="display:inline;">
+          <a href="{% url 'admin:index' %}" class="btn-nav navbar-admin-btn">관리자 페이지</a>
+          <form method="post" action="{% url 'accounts:logout' %}" style="display:inline;" class="navbar-logout-form">
             {% csrf_token %}
             <button type="submit" class="btn-nav btn-nav--ghost">로그아웃</button>
           </form>
-        {% else %}
-          <a href="{% url 'accounts:login' %}?next={{ request.path }}" class="btn-nav btn-nav--ghost">관리자 로그인</a>
         {% endif %}
       </div>
     </div>

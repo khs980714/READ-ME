@@ -219,7 +219,7 @@
   <h2>난이도 분류 진행</h2>
   <p class="card-desc">
     설명은 있지만 난이도가 미분류인 <strong>{{ unclassified }}권</strong>을 대상으로
-    Yes24 리뷰 스크래핑 후 LLM으로 난이도를 분류합니다.
+    도서 설명을 기반으로 LLM이 난이도를 분류합니다.
     {% if not unclassified %}현재 미분류 도서가 없습니다.{% endif %}
   </p>
 
@@ -372,6 +372,7 @@
 
     function startStream(jobId) {
       if (es) es.close();
+      let isDone = false;
       es = new EventSource(streamBase + jobId + "/");
 
       es.onmessage = (e) => {
@@ -398,6 +399,7 @@
           }
 
         } else if (ev.type === "complete") {
+          isDone = true;
           setProgress(progressBar, progressText, progressPct, ev.total, ev.total);
           currentEl.textContent = "";
           appendLog(logContainer, "info", {
@@ -408,6 +410,7 @@
           btn.disabled = false;
 
         } else if (ev.type === "fatal") {
+          isDone = true;
           appendLog(logContainer, "error", { errorMsg: "치명적 오류: " + ev.error });
           setStatus(statusBadge, "failed");
           es.close();
@@ -416,6 +419,7 @@
       };
 
       es.onerror = () => {
+        if (isDone) return;
         appendLog(logContainer, "error", { errorMsg: "스트림 연결이 끊겼습니다." });
         setStatus(statusBadge, "failed");
         es.close();

@@ -115,8 +115,7 @@ def book_add(request):
         isbn = request.POST.get("isbn", "").strip()
         thumbnail_url = request.POST.get("thumbnail_url", "").strip()
         description = request.POST.get("description", "").strip()
-        published_at = request.POST.get("published_at", "").strip() or None
-        page_count = request.POST.get("page_count", "").strip() or None
+        toc = request.POST.get("toc", "").strip()
         category_ids = request.POST.getlist("categories")
         is_active = request.POST.get("is_active") == "on"
 
@@ -135,8 +134,7 @@ def book_add(request):
                         "isbn": isbn,
                         "thumbnail_url": thumbnail_url,
                         "description": description,
-                        "published_at": published_at,
-                        "page_count": page_count,
+                        "toc": toc,
                     },
                 )
                 if not created:
@@ -145,8 +143,7 @@ def book_add(request):
                     book_list.isbn = isbn
                     book_list.thumbnail_url = thumbnail_url
                     book_list.description = description
-                    book_list.published_at = published_at
-                    book_list.page_count = page_count
+                    book_list.toc = toc
                     book_list.save()
 
                 book_list.categories.set(Category.objects.filter(id__in=category_ids))
@@ -192,8 +189,7 @@ def book_edit(request, pk):
         isbn = request.POST.get("isbn", "").strip()
         thumbnail_url = request.POST.get("thumbnail_url", "").strip()
         description = request.POST.get("description", "").strip()
-        published_at = request.POST.get("published_at", "").strip() or None
-        page_count = request.POST.get("page_count", "").strip() or None
+        toc = request.POST.get("toc", "").strip()
         category_ids = request.POST.getlist("categories")
         is_active = request.POST.get("is_active") == "on"
 
@@ -214,8 +210,7 @@ def book_edit(request, pk):
                 book_list.isbn = isbn
                 book_list.thumbnail_url = thumbnail_url
                 book_list.description = description
-                book_list.published_at = published_at
-                book_list.page_count = page_count
+                book_list.toc = toc
                 book_list.save()
                 book_list.categories.set(Category.objects.filter(id__in=category_ids))
                 book.is_active = is_active
@@ -264,6 +259,27 @@ def _schedule_embedding_refresh(book_list_pk: int) -> None:
             logger.error("임베딩 재생성 오류 (book_list_pk=%s): %s", book_list_pk, exc)
 
     threading.Thread(target=_run, daemon=True).start()
+
+
+@_staff_required
+@require_POST
+def book_collect(request, pk):
+    """개별 도서 데이터 수집 (AJAX). force=true이면 기존 데이터 덮어쓰기."""
+    book = get_object_or_404(Book, pk=pk)
+    import json as _json
+    try:
+        body = _json.loads(request.body or "{}")
+    except Exception:
+        body = {}
+    force = body.get("force", False)
+
+    try:
+        from .services import collect_book_data
+        result = collect_book_data(book.book_list, force=force)
+        return JsonResponse({"ok": True, **result})
+    except Exception as exc:
+        logger.error("book_collect 오류 (pk=%s): %s", pk, exc)
+        return JsonResponse({"ok": False, "error": str(exc)}, status=500)
 
 
 @_staff_required
