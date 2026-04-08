@@ -1,0 +1,346 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}데이터 수집 — READ:ME{% endblock %}
+
+{% block extra_css %}
+<style>
+  .pipeline-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    box-shadow: var(--shadow-sm);
+  }
+  .stat-label { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 6px; }
+  .stat-value { font-size: 1.8rem; font-weight: 800; color: var(--primary); }
+
+  .pipeline-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px;
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 24px;
+  }
+  .pipeline-card h2 {
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin-bottom: 18px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Progress Bar */
+  .progress-wrap { margin-bottom: 16px; }
+  .progress-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.82rem;
+    color: var(--text-sub);
+    margin-bottom: 8px;
+  }
+  .progress-bar-track {
+    height: 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 99px;
+    overflow: hidden;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    background: var(--primary);
+    border-radius: 99px;
+    transition: width .4s ease;
+    width: 0%;
+  }
+  .progress-current {
+    margin-top: 10px;
+    font-size: 0.84rem;
+    color: var(--text-sub);
+    min-height: 20px;
+  }
+
+  /* Log */
+  .log-wrap {
+    margin-top: 20px;
+    max-height: 360px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #1e1e2e;
+    padding: 14px;
+    font-family: "Menlo", "Consolas", monospace;
+    font-size: 0.8rem;
+    line-height: 1.7;
+  }
+  .log-entry { display: flex; gap: 10px; align-items: flex-start; }
+  .log-icon { flex-shrink: 0; }
+  .log-entry.success .log-icon { color: #4ade80; }
+  .log-entry.error   .log-icon { color: #f87171; }
+  .log-entry.info    .log-icon { color: #94a3b8; }
+  .log-book-code { color: #c084fc; font-weight: 600; }
+  .log-title     { color: #e2e8f0; }
+  .log-error-msg { color: #f87171; font-size: 0.76rem; margin-top: 2px; }
+  .log-sub-msg   { color: #64748b; font-size: 0.76rem; }
+
+  /* Controls */
+  .pipeline-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  .btn-danger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #dc2626;
+    color: #fff;
+    border: none;
+    padding: 9px 20px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: background .2s;
+  }
+  .btn-danger:hover { background: #b91c1c; }
+  .btn-danger:disabled { background: var(--border); color: var(--text-muted); cursor: not-allowed; }
+
+  .status-badge {
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 20px;
+    display: none;
+  }
+  .status-badge.running  { display: inline-flex; background: #fef3c7; color: #d97706; }
+  .status-badge.done     { display: inline-flex; background: #dcfce7; color: #16a34a; }
+  .status-badge.failed   { display: inline-flex; background: #fee2e2; color: #dc2626; }
+
+  @media (max-width: 768px) {
+    .pipeline-grid { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <h1 class="page-title">데이터 수집</h1>
+  <p class="page-desc">Naver API, 난이도 분류, 임베딩 생성 파이프라인을 실행합니다.</p>
+</section>
+
+<!-- ── 통계 ── -->
+<div class="pipeline-grid">
+  <div class="stat-card">
+    <p class="stat-label">전체 활성 도서</p>
+    <p class="stat-value">{{ total_books }}</p>
+  </div>
+  <div class="stat-card">
+    <p class="stat-label">미수집 도서 (설명 없음)</p>
+    <p class="stat-value">{{ pending }}</p>
+  </div>
+</div>
+
+<!-- ── 파이프라인 실행 ── -->
+<div class="pipeline-card">
+  <h2>파이프라인 실행</h2>
+
+  <div class="pipeline-controls">
+    <button class="btn-primary" id="btnRun">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polygon points="5 3 19 12 5 21 5 3"/>
+      </svg>
+      데이터 수집 시작
+    </button>
+    <span class="status-badge" id="statusBadge">실행 중...</span>
+  </div>
+
+  <!-- 진행 바 -->
+  <div class="progress-wrap" id="progressWrap" style="display:none;">
+    <div class="progress-meta">
+      <span id="progressText">0 / 0</span>
+      <span id="progressPct">0%</span>
+    </div>
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" id="progressBar"></div>
+    </div>
+    <p class="progress-current" id="currentBook"></p>
+  </div>
+
+  <!-- 로그 -->
+  <div class="log-wrap" id="logWrap" style="display:none;">
+    <div id="logContent"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  const RUN_URL = "{% url 'pipeline:run' %}";
+  const STREAM_BASE = "/pipeline/stream/";
+  const CSRF_TOKEN = "{{ csrf_token }}";
+
+  const btnRun      = document.getElementById("btnRun");
+  const statusBadge = document.getElementById("statusBadge");
+  const progressWrap = document.getElementById("progressWrap");
+  const progressBar  = document.getElementById("progressBar");
+  const progressText = document.getElementById("progressText");
+  const progressPct  = document.getElementById("progressPct");
+  const currentBook  = document.getElementById("currentBook");
+  const logWrap      = document.getElementById("logWrap");
+  const logContent   = document.getElementById("logContent");
+
+  let eventSource = null;
+
+  btnRun.addEventListener("click", async () => {
+    if (btnRun.disabled) return;
+    btnRun.disabled = true;
+    logContent.innerHTML = "";
+    progressWrap.style.display = "block";
+    logWrap.style.display = "block";
+    setProgressBar(0, 0, 0);
+    currentBook.textContent = "파이프라인 시작 중...";
+    setStatus("running");
+
+    try {
+      const res = await fetch(RUN_URL, {
+        method: "POST",
+        headers: { "X-CSRFToken": CSRF_TOKEN, "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        appendLog("error", null, null, data.error || "알 수 없는 오류");
+        setStatus("failed");
+        btnRun.disabled = false;
+        return;
+      }
+      startStream(data.job_id);
+    } catch (e) {
+      appendLog("error", null, null, "서버 연결 실패: " + e.message);
+      setStatus("failed");
+      btnRun.disabled = false;
+    }
+  });
+
+  function startStream(jobId) {
+    if (eventSource) eventSource.close();
+    eventSource = new EventSource(STREAM_BASE + jobId + "/");
+
+    eventSource.onmessage = (e) => {
+      const ev = JSON.parse(e.data);
+
+      if (ev.type === "start") {
+        appendLog("info", null, null, `총 ${ev.total}권 수집 시작`);
+
+      } else if (ev.type === "progress") {
+        setProgressBar(ev.done, ev.total, ev.done);
+        currentBook.textContent = ev.current ? `처리 중: ${ev.current}` : "";
+
+      } else if (ev.type === "log") {
+        if (ev.status === "success") {
+          appendLog("success", ev.book_code, ev.title, null, ev.messages);
+        } else {
+          appendLog("error", ev.book_code, ev.title, ev.error, ev.messages);
+        }
+
+      } else if (ev.type === "complete") {
+        setProgressBar(ev.done, ev.total, ev.total);
+        currentBook.textContent = "";
+        appendLog("info", null, null,
+          `완료 — 성공: ${ev.done}건, 오류: ${ev.errors}건, 합계: ${ev.total}건`);
+        setStatus(ev.errors > 0 ? "failed" : "done");
+        eventSource.close();
+        btnRun.disabled = false;
+
+      } else if (ev.type === "fatal") {
+        appendLog("error", null, null, "치명적 오류: " + ev.error);
+        setStatus("failed");
+        eventSource.close();
+        btnRun.disabled = false;
+      }
+    };
+
+    eventSource.onerror = () => {
+      appendLog("error", null, null, "스트림 연결이 끊겼습니다.");
+      setStatus("failed");
+      eventSource.close();
+      btnRun.disabled = false;
+    };
+  }
+
+  function setProgressBar(done, total, filled) {
+    const pct = total > 0 ? Math.round((filled / total) * 100) : 0;
+    progressBar.style.width = pct + "%";
+    progressText.textContent = `${done} / ${total}`;
+    progressPct.textContent = pct + "%";
+  }
+
+  function setStatus(state) {
+    statusBadge.className = "status-badge " + state;
+    statusBadge.textContent = state === "running" ? "실행 중..." : state === "done" ? "완료" : "오류 발생";
+  }
+
+  function appendLog(type, bookCode, title, errorMsg, subMsgs) {
+    const entry = document.createElement("div");
+    entry.className = `log-entry ${type}`;
+
+    const icon = document.createElement("span");
+    icon.className = "log-icon";
+    icon.textContent = type === "success" ? "✓" : type === "error" ? "✗" : "·";
+
+    const body = document.createElement("div");
+
+    if (bookCode || title) {
+      const main = document.createElement("div");
+      if (bookCode) {
+        const codeSpan = document.createElement("span");
+        codeSpan.className = "log-book-code";
+        codeSpan.textContent = `[${bookCode}] `;
+        main.appendChild(codeSpan);
+      }
+      if (title) {
+        const titleSpan = document.createElement("span");
+        titleSpan.className = "log-title";
+        titleSpan.textContent = title;
+        main.appendChild(titleSpan);
+      }
+      body.appendChild(main);
+    } else if (errorMsg && !bookCode) {
+      // 단순 메시지
+      const msg = document.createElement("div");
+      msg.className = "log-title";
+      msg.textContent = errorMsg;
+      body.appendChild(msg);
+      errorMsg = null;
+    }
+
+    if (errorMsg) {
+      const err = document.createElement("div");
+      err.className = "log-error-msg";
+      err.textContent = "→ " + errorMsg;
+      body.appendChild(err);
+    }
+
+    if (subMsgs && subMsgs.length) {
+      subMsgs.forEach(m => {
+        const sub = document.createElement("div");
+        sub.className = "log-sub-msg";
+        sub.textContent = "  " + m;
+        body.appendChild(sub);
+      });
+    }
+
+    entry.appendChild(icon);
+    entry.appendChild(body);
+    logContent.appendChild(entry);
+    logContent.scrollTop = logContent.scrollHeight;
+  }
+</script>
+{% endblock %}

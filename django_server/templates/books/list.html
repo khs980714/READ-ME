@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}도서 목록 — READ:ME{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <h1 class="page-title">도서 목록</h1>
+  <p class="page-desc">IT·개발 도서를 탐색하고 나에게 맞는 책을 찾아보세요.</p>
+</section>
+
+<!-- ── 검색·필터 ──────────────────────────────────────────── -->
+<div class="filter-bar">
+  <form class="filter-form" method="get" action="">
+    <div class="search-box">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <input type="text" name="q" value="{{ query }}" placeholder="도서명 또는 저자 검색" class="search-input">
+    </div>
+
+    <select name="difficulty" class="filter-select">
+      <option value="">난이도 전체</option>
+      {% for val, label in difficulties %}
+        <option value="{{ val }}" {% if selected_difficulty == val %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+
+    <select name="category" class="filter-select">
+      <option value="">카테고리 전체</option>
+      {% for cat in categories %}
+        <option value="{{ cat.id }}" {% if selected_category == cat.id|stringformat:"s" %}selected{% endif %}>{{ cat.name }}</option>
+      {% endfor %}
+    </select>
+
+    <button type="submit" class="btn-primary">검색</button>
+    <a href="{% url 'books:list' %}" class="btn-ghost">초기화</a>
+  </form>
+</div>
+
+<!-- ── 도서 카드 그리드 ───────────────────────────────────── -->
+<div class="book-count">
+  총 <strong>{{ books|length }}</strong>권
+</div>
+
+{% if books %}
+<div class="book-grid">
+  {% for book in books %}
+  <a href="{% url 'books:detail' book.pk %}" class="book-card">
+    <div class="book-thumb">
+      {% if book.thumbnail_url %}
+        <img src="{{ book.thumbnail_url }}" alt="{{ book.title }}" loading="lazy">
+      {% else %}
+        <div class="book-thumb-placeholder">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M4 19.5A2.5 2.5 0 016.5 17H20"/>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>
+          </svg>
+        </div>
+      {% endif %}
+    </div>
+    <div class="book-info">
+      <div class="book-meta-top">
+        {% if book.difficulty %}
+          <span class="badge badge--{{ book.difficulty }}">{{ book.difficulty }}</span>
+        {% endif %}
+        <span class="book-code">{{ book.book_code }}</span>
+      </div>
+      <h3 class="book-title">{{ book.title }}</h3>
+      <p class="book-author">{{ book.get_author_display }}</p>
+      <p class="book-publisher">{{ book.publisher.name }}</p>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+  </svg>
+  <p>검색 결과가 없습니다.</p>
+  <a href="{% url 'books:list' %}" class="btn-ghost">전체 목록 보기</a>
+</div>
+{% endif %}
+{% endblock %}

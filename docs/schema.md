@@ -2,7 +2,7 @@
 
 ## 개요
 
-- **DBMS**: Supabase (PostgreSQL)
+- **DBMS**: PostgreSQL 16 (Docker: `pgvector/pgvector:pg16`)
 - **Vector Extension**: pgvector (`CREATE EXTENSION IF NOT EXISTS vector;`)
 - **문자셋**: UTF-8
 
@@ -142,7 +142,7 @@ COMMENT ON TABLE book_categories IS '도서-카테고리 다대다';
 CREATE TABLE book_embeddings (
     id          SERIAL      PRIMARY KEY,
     book_id     INT         NOT NULL UNIQUE REFERENCES books(id) ON DELETE CASCADE,
-    embedding   VECTOR(1536) NOT NULL,    -- OpenAI text-embedding-3-small 기준
+    embedding   VECTOR(1024) NOT NULL,    -- NVIDIA nv-embedqa-e5-v5 기준 (dim=1024)
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

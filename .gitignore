@@ -1,8 +1,35 @@
-.venv/
-.claude/
+# ── Python ────────────────────────────────────────────────────
 __pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
 
-migrations/
+# ── Virtual envs ──────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Django ────────────────────────────────────────────────────
+db.sqlite3
+django_server/staticfiles/
+django_server/media/
+
+# ── Environment ───────────────────────────────────────────────
 .env
 
+# ── Editor / OS ───────────────────────────────────────────────
+.claude/
+.idea/
+.vscode/
+*.DS_Store
+Thumbs.db
+
+# ── Docker ────────────────────────────────────────────────────
+*.log
+
+# data
+data.csv
 example_data.csv
+
+test/

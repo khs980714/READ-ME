@@ -3,13 +3,14 @@ fastapi>=0.115,<1.0
 uvicorn[standard]>=0.30,<1.0
 
 # ── LangChain / LangSmith ─────────────────────────────────────
-langchain>=0.3,<0.4
-langchain-openai>=0.2,<0.3    # OpenAI SDK 기반 NVIDIA NIM 연동
-langchain-community>=0.3,<0.4
-langsmith>=0.1,<0.2
+langchain>=1.2,<2.0
+langchain-openai>=1.1,<2.0    # OpenAI SDK 기반 NVIDIA NIM 연동
+langchain-community>=0.4,<1.0
+langchain-classic>=1.0,<2.0   # langchain-community 0.4.x 의존성
+langsmith>=0.7,<1.0
 
 # ── LLM / Embedding ───────────────────────────────────────────
-openai>=1.40,<2.0             # NVIDIA NIM은 OpenAI 호환 SDK로 호출
+openai>=2.26,<3.0             # NVIDIA NIM은 OpenAI 호환 SDK로 호출
 
 # ── Database / Vector ─────────────────────────────────────────
 psycopg2-binary>=2.9,<3.0

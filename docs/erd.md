@@ -27,37 +27,39 @@ erDiagram
         timestamptz created_at
     }
 
+    book_list {
+        int     id              PK
+        varchar title
+        int     author_id       FK  "대표 저자"
+        int     publisher_id    FK
+        text    description
+        enum    difficulty          "입문|초급|중급|고급"
+        varchar isbn
+        text    thumbnail_url
+        date    published_at
+        int     page_count
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    book_list_categories {
+        int book_list_id    PK,FK
+        int category_id     PK,FK
+    }
+
     books {
         int     id              PK
         varchar book_code       UK  "D-246 등 원본 코드"
-        varchar title
-        int     publisher_id    FK
-        varchar isbn
-        text    thumbnail_url
-        text    description
-        enum    difficulty          "입문|초급|중급|고급"
-        date    published_at
-        int     page_count
+        int     book_list_id    FK
         bool    is_active
         timestamptz created_at
         timestamptz updated_at
     }
 
-    book_authors {
-        int      book_id       PK,FK
-        int      author_id     PK,FK
-        smallint author_order      "저자 표기 순서"
-    }
-
-    book_categories {
-        int book_id         PK,FK
-        int category_id     PK,FK
-    }
-
     book_embeddings {
-        int     id          PK
-        int     book_id     UK,FK
-        vector  embedding       "dim=1536 (OpenAI)"
+        int     id              PK
+        int     book_list_id    UK,FK  "book_list 단위 중복 방지"
+        vector  embedding           "dim=1024 (NVIDIA nv-embedqa-e5-v5)"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -90,12 +92,12 @@ erDiagram
 
     %% ── 관계 ─────────────────────────────────────────────────
 
-    publishers      ||--o{ books               : "출판"
-    books           ||--o{ book_authors         : "집필"
-    authors         ||--o{ book_authors         : "집필"
-    books           ||--o{ book_categories      : "분류"
-    categories      ||--o{ book_categories      : "분류"
-    books           ||--|| book_embeddings      : "임베딩"
+    publishers      ||--o{ book_list            : "출판"
+    authors         ||--o{ book_list            : "집필"
+    book_list       ||--o{ book_list_categories : "분류"
+    categories      ||--o{ book_list_categories : "분류"
+    book_list       ||--o{ books               : "코드 등록"
+    book_list       ||--|| book_embeddings      : "임베딩"
     chat_sessions   ||--o{ chat_messages        : "포함"
     chat_messages   ||--o{ chat_recommendations : "추천"
     books           ||--o{ chat_recommendations : "추천됨"
@@ -106,10 +108,11 @@ erDiagram
 ## 관계 요약
 
 ```
-publishers (1) ──── (N) books
-authors    (M) ──── (N) books        [ book_authors 경유, author_order 포함 ]
-categories (M) ──── (N) books        [ book_categories 경유 ]
-books      (1) ──── (1) book_embeddings
+publishers (1) ──── (N) book_list
+authors    (1) ──── (N) book_list    [ 대표 저자 단일 FK ]
+categories (M) ──── (N) book_list   [ book_list_categories 경유 ]
+book_list  (1) ──── (N) books        [ 동일 책의 다수 코드 지원, 중복 수집 방지 ]
+book_list  (1) ──── (1) book_embeddings
 chat_sessions (1) ── (N) chat_messages
 chat_messages (1) ── (N) chat_recommendations
 books       (1) ──── (N) chat_recommendations

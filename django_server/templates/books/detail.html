@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ book.title }} — READ:ME{% endblock %}
+
+{% block content %}
+<div class="detail-back">
+  <a href="{% url 'books:list' %}" class="back-link">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+    도서 목록으로
+  </a>
+</div>
+
+<div class="detail-wrap">
+  <!-- ── 썸네일 ── -->
+  <aside class="detail-thumb">
+    {% if book.thumbnail_url %}
+      <img src="{{ book.thumbnail_url }}" alt="{{ book.title }}">
+    {% else %}
+      <div class="detail-thumb-placeholder">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+          <path d="M4 19.5A2.5 2.5 0 016.5 17H20"/>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>
+        </svg>
+      </div>
+    {% endif %}
+  </aside>
+
+  <!-- ── 도서 정보 ── -->
+  <section class="detail-info">
+    <div class="detail-badges">
+      <span class="book-code">{{ book.book_code }}</span>
+      {% if book.difficulty %}
+        <span class="badge badge--{{ book.difficulty }}">{{ book.difficulty }}</span>
+      {% endif %}
+      {% for cat in book.categories.all %}
+        <span class="badge badge--category">{{ cat.name }}</span>
+      {% endfor %}
+    </div>
+
+    <h1 class="detail-title">{{ book.title }}</h1>
+
+    <dl class="detail-meta">
+      <div class="meta-row">
+        <dt>저자</dt>
+        <dd>{{ book.get_author_display }}</dd>
+      </div>
+      <div class="meta-row">
+        <dt>출판사</dt>
+        <dd>{{ book.publisher.name }}</dd>
+      </div>
+      {% if book.published_at %}
+      <div class="meta-row">
+        <dt>출판일</dt>
+        <dd>{{ book.published_at|date:"Y년 m월 d일" }}</dd>
+      </div>
+      {% endif %}
+      {% if book.isbn %}
+      <div class="meta-row">
+        <dt>ISBN</dt>
+        <dd>{{ book.isbn }}</dd>
+      </div>
+      {% endif %}
+      {% if book.page_count %}
+      <div class="meta-row">
+        <dt>페이지</dt>
+        <dd>{{ book.page_count }}p</dd>
+      </div>
+      {% endif %}
+    </dl>
+
+    <div class="detail-actions">
+      <a href="{% url 'chat:page' %}" class="btn-primary">AI에게 추천 받기</a>
+    </div>
+  </section>
+</div>
+
+{% if book.description %}
+<section class="detail-desc">
+  <h2 class="section-title">도서 소개</h2>
+  <div class="desc-body">{{ book.description|linebreaks }}</div>
+</section>
+{% endif %}
+{% endblock %}

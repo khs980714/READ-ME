@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}AI 도서 추천 — READ:ME{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/chat.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="chat-layout">
+
+  <!-- ── 사이드바 ──────────────────────────────────────────── -->
+  <aside class="chat-sidebar">
+    <div class="sidebar-header">
+      <h2>AI 도서 추천</h2>
+      <p>궁금한 것을 물어보세요!</p>
+    </div>
+    <ul class="guide-list">
+      <li>
+        <span class="guide-icon">🗺️</span>
+        <div>
+          <strong>학습 로드맵</strong>
+          <p>백엔드 개발 공부 순서 알려줘</p>
+        </div>
+      </li>
+      <li>
+        <span class="guide-icon">📊</span>
+        <div>
+          <strong>수준별 추천</strong>
+          <p>파이썬 중급자에게 맞는 책 추천해줘</p>
+        </div>
+      </li>
+      <li>
+        <span class="guide-icon">💬</span>
+        <div>
+          <strong>도서 질문</strong>
+          <p>클린코드 책 어떤 내용이야?</p>
+        </div>
+      </li>
+    </ul>
+    <button class="btn-ghost btn-new-chat" id="btnNewChat">새 대화 시작</button>
+  </aside>
+
+  <!-- ── 채팅 영역 ─────────────────────────────────────────── -->
+  <div class="chat-main">
+    <div class="chat-messages" id="chatMessages">
+      <!-- 초기 메시지 -->
+      <div class="msg msg--assistant">
+        <div class="msg-avatar">AI</div>
+        <div class="msg-body">
+          <div class="msg-bubble">
+            안녕하세요! 저는 IT·개발 도서 추천 AI입니다.<br>
+            학습 로드맵, 수준별 추천, 도서 정보 등 무엇이든 물어보세요 😊
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 입력창 ── -->
+    <div class="chat-input-wrap">
+      <div class="chat-input-inner">
+        <textarea
+          id="chatInput"
+          class="chat-textarea"
+          placeholder="메시지를 입력하세요... (Shift+Enter: 줄바꿈)"
+          rows="1"
+        ></textarea>
+        <button class="btn-send" id="btnSend" aria-label="전송">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── 추천 카드 모달 ─────────────────────────────────────── -->
+<div class="modal-overlay" id="moreModal" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>더 많은 추천 도서</h3>
+      <button class="modal-close" id="modalClose">✕</button>
+    </div>
+    <div class="modal-body" id="modalBookList"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+  const CHAT_HISTORY = {{ history|safe }};
+  const SEND_URL = "{% url 'chat:send_message' %}";
+  const CSRF_TOKEN = "{{ csrf_token }}";
+  const BOOK_DETAIL_URL = "/books/{id}/";
+</script>
+<script src="{% static 'js/chat.js' %}"></script>
+{% endblock %}

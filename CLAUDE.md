@@ -22,7 +22,7 @@
       │                               OpenAI SDK → NVIDIA NIM
       │
       ▼
-[Supabase PostgreSQL]
+[PostgreSQL 16 + pgvector  (Docker service: db)]
   ├── 관계형 테이블 (books, authors, publishers …)
   └── book_embeddings (pgvector, cosine similarity)
 ```
@@ -33,7 +33,7 @@
 |---|---|---|
 | Django | `django_server/` | 웹 UI, REST API, Django Admin, 데이터 파이프라인 관리 커맨드 |
 | FastAPI | `fastapi_server/` | LLM 추론, 임베딩 생성, 질문 분류, LangChain 체인 실행 |
-| Supabase | 외부 서비스 | PostgreSQL + pgvector |
+| PostgreSQL | `db` (Docker) | PostgreSQL 16 + pgvector, 포트 5432 |
 
 ---
 
@@ -61,7 +61,7 @@ READ-ME/
 ├── Dockerfile.django_server
 ├── Dockerfile.fastapi_server
 ├── .env.example
-├── example_data.csv      # 초기 도서 데이터 (최초 1회만 사용)
+├── data.csv      # 초기 도서 데이터 (최초 1회만 사용)
 └── README.md
 ```
 
@@ -100,7 +100,7 @@ chat_sessions ──(1:N)── chat_messages ──(1:N)── chat_recommendat
 
 ```bash
 python manage.py load_books
-# example_data.csv → publishers, authors, books, book_authors 생성
+# data.csv → publishers, authors, books, book_authors 생성
 ```
 
 ### 도서 등록 후 자동 실행 (books post_save signal)
@@ -137,7 +137,7 @@ python manage.py load_books
 
 | 변수 | 설명 |
 |---|---|
-| `DATABASE_URL` | Supabase PostgreSQL 연결 문자열 |
+| `DATABASE_URL` | PostgreSQL 연결 문자열 (`postgresql://readme:readme1234@db:5432/readme_db`) |
 | `NAVER_CLIENT_ID` / `NAVER_CLIENT_SECRET` | Naver Book Search API 인증 |
 | `OPENAI_API_KEY` | 임베딩 생성용 OpenAI 키 |
 | `NVIDIA_NIM_BASE_URL` / `NVIDIA_NIM_MODEL` | NVIDIA NIM 모델 엔드포인트 |
@@ -167,7 +167,7 @@ python manage.py load_books
 
 ## 작업 시 주의사항
 
-- `example_data.csv`는 읽기 전용 참고 파일. 직접 수정 금지.
+- `data.csv`는 읽기 전용 참고 파일. 직접 수정 금지.
 - `book_embeddings` 재생성 시 HNSW 인덱스 자동 갱신됨 (별도 작업 불필요).
 - `chat_recommendations.similarity_score` threshold는 FastAPI 환경 변수로 관리.
 - Django Admin에서 도서 삭제 시 `book_authors`, `book_categories`, `book_embeddings`, `chat_recommendations` cascade 삭제됨 — 주의.
