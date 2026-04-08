@@ -377,7 +377,7 @@
           </label>
           <input class="form-input" type="text" id="title" name="title"
                  placeholder="도서 제목을 입력하세요"
-                 value="{{ form_data.title|default:book_list.title|default:'' }}" required>
+                 value="{{ form_data.title|default:'' }}" required>
         </div>
 
         <div class="form-group">
@@ -386,7 +386,7 @@
           </label>
           <input class="form-input" type="text" id="author" name="author"
                  placeholder="저자 이름"
-                 value="{{ form_data.author|default:book_list.author.name|default:'' }}" required>
+                 value="{{ form_data.author|default:'' }}" required>
         </div>
 
         <div class="form-group">
@@ -395,7 +395,7 @@
           </label>
           <input class="form-input" type="text" id="publisher" name="publisher"
                  placeholder="출판사명"
-                 value="{{ form_data.publisher|default:book_list.publisher.name|default:'' }}" required>
+                 value="{{ form_data.publisher|default:'' }}" required>
         </div>
       </div>
     </div>
@@ -410,7 +410,7 @@
             <option value="">— 선택 안함 —</option>
             {% for val, label in difficulties %}
               <option value="{{ val }}"
-                {% if form_data.difficulty == val or book_list.difficulty == val %}selected{% endif %}>
+                {% if form_data.difficulty == val %}selected{% endif %}>
                 {{ label }}
               </option>
             {% endfor %}
@@ -421,26 +421,26 @@
           <label class="form-label" for="isbn">ISBN</label>
           <input class="form-input" type="text" id="isbn" name="isbn"
                  placeholder="978-89-..."
-                 value="{{ form_data.isbn|default:book_list.isbn|default:'' }}">
+                 value="{{ form_data.isbn|default:'' }}">
         </div>
 
         <div class="form-group form-col-full">
           <label class="form-label" for="thumbnail_url">썸네일 URL</label>
           <input class="form-input" type="url" id="thumbnail_url" name="thumbnail_url"
                  placeholder="https://..."
-                 value="{{ form_data.thumbnail_url|default:book_list.thumbnail_url|default:'' }}">
+                 value="{{ form_data.thumbnail_url|default:'' }}">
         </div>
 
         <div class="form-group form-col-full">
           <label class="form-label" for="description">도서 소개</label>
           <textarea class="form-textarea" id="description" name="description"
-                    placeholder="도서 소개 내용을 입력하세요">{{ form_data.description|default:book_list.description|default:'' }}</textarea>
+                    placeholder="도서 소개 내용을 입력하세요">{{ form_data.description|default:'' }}</textarea>
         </div>
 
         <div class="form-group form-col-full">
           <label class="form-label" for="toc">목차</label>
           <textarea class="form-textarea" id="toc" name="toc"
-                    placeholder="목차 내용을 입력하세요">{{ form_data.toc|default:book_list.toc|default:'' }}</textarea>
+                    placeholder="목차 내용을 입력하세요">{{ form_data.toc|default:'' }}</textarea>
         </div>
       </div>
     </div>

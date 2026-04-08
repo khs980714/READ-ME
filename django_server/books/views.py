@@ -161,6 +161,8 @@ def book_add(request):
 
     return render(request, "books/manage_form.html", {
         "mode": "add",
+        "book_list": None,
+        "selected_category_ids": set(),
         "categories": categories,
         "difficulties": difficulties,
         "error": error,
@@ -180,8 +182,19 @@ def book_edit(request, pk):
     difficulties = BookList.Difficulty.choices
     selected_category_ids = set(book_list.categories.values_list("id", flat=True))
     error = None
+    form_data = {
+        "title": book_list.title,
+        "author": book_list.author.name,
+        "publisher": book_list.publisher.name,
+        "difficulty": book_list.difficulty,
+        "isbn": book_list.isbn,
+        "thumbnail_url": book_list.thumbnail_url,
+        "description": book_list.description,
+        "toc": book_list.toc,
+    }
 
     if request.method == "POST":
+        form_data = request.POST
         title = request.POST.get("title", "").strip()
         author_name = request.POST.get("author", "").strip()
         publisher_name = request.POST.get("publisher", "").strip()
@@ -240,6 +253,7 @@ def book_edit(request, pk):
         "mode": "edit",
         "book": book,
         "book_list": book_list,
+        "form_data": form_data,
         "categories": categories,
         "difficulties": difficulties,
         "selected_category_ids": selected_category_ids,
