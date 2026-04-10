@@ -33,3 +33,6 @@ data.csv
 example_data.csv
 
 test/
+
+# 로컬 전용 메모
+앞으로 할 일.md

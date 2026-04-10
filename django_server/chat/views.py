@@ -27,32 +27,11 @@ def _get_or_create_session(request) -> ChatSession:
 
 
 def chat_page(request):
-    session = _get_or_create_session(request)
-    messages = session.messages.order_by("created_at")
-    history = []
-    for msg in messages:
-        entry = {"role": msg.role, "content": msg.content, "question_type": msg.question_type}
-        if msg.role == ChatMessage.Role.ASSISTANT:
-            recs = msg.recommendations.select_related(
-                "book__book_list__publisher", "book__book_list__author"
-            ).order_by("rank")
-            entry["recommendations"] = [
-                {
-                    "id": r.book.pk,
-                    "title": r.book.book_list.title,
-                    "author": r.book.book_list.get_author_display(),
-                    "publisher": r.book.book_list.publisher.name,
-                    "difficulty": r.book.book_list.difficulty,
-                    "thumbnail_url": r.book.book_list.thumbnail_url,
-                    "rank": r.rank,
-                    "score": r.similarity_score,
-                }
-                for r in recs
-            ]
-        history.append(entry)
-
-    response = render(request, "chat/chat.html", {"history": json.dumps(history, ensure_ascii=False)})
-    response.set_cookie(SESSION_COOKIE, str(session.pk), max_age=60 * 60 * 24 * 30, httponly=True, samesite="Lax")
+    # 페이지 로드 시 항상 새 세션을 생성합니다.
+    # httponly 쿠키는 JS에서 삭제할 수 없으므로, 세션 갱신은 서버에서 처리합니다.
+    session = ChatSession.objects.create()
+    response = render(request, "chat/chat.html", {"history": "[]"})
+    response.set_cookie(SESSION_COOKIE, str(session.pk), max_age=60 * 60 * 24, httponly=True, samesite="Lax")
     return response
 
 

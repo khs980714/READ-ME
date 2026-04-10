@@ -259,24 +259,24 @@
       <tr>
         <td class="td-code">{{ book.book_code }}</td>
         <td class="td-title">
-          <a href="{% url 'books:detail' book.pk %}">{{ book.book_list.title }}</a>
+          <a href="{% url 'books:detail' book.pk %}">{{ book.title }}</a>
         </td>
         <td class="td-author">
-          <span title="{{ book.book_list.author.name }}">{{ book.book_list.author.name }}</span>
+          <span title="{{ book.get_author_display }}">{{ book.get_author_display }}</span>
         </td>
-        <td class="td-publisher">{{ book.book_list.publisher.name }}</td>
+        <td class="td-publisher">{{ book.publisher.name }}</td>
         <td>
-          {% if book.book_list.difficulty %}
-            <span class="badge badge--{{ book.book_list.difficulty }}">{{ book.book_list.difficulty }}</span>
+          {% if book.difficulty %}
+            <span class="badge badge--{{ book.difficulty }}">{{ book.difficulty }}</span>
           {% else %}
             <span class="td-inactive">미분류</span>
           {% endif %}
         </td>
         <td>
           <div class="collect-badges" id="collect-badges-{{ book.pk }}">
-            <span class="collect-badge {% if book.book_list.thumbnail_url %}collect-badge--ok{% else %}collect-badge--no{% endif %}">이미지</span>
-            <span class="collect-badge {% if book.book_list.description %}collect-badge--ok{% else %}collect-badge--no{% endif %}">소개</span>
-            <span class="collect-badge {% if book.book_list.toc %}collect-badge--ok{% else %}collect-badge--no{% endif %}">목차</span>
+            <span class="collect-badge {% if book.thumbnail_url %}collect-badge--ok{% else %}collect-badge--no{% endif %}">이미지</span>
+            <span class="collect-badge {% if book.description %}collect-badge--ok{% else %}collect-badge--no{% endif %}">소개</span>
+            <span class="collect-badge {% if book.toc %}collect-badge--ok{% else %}collect-badge--no{% endif %}">목차</span>
           </div>
         </td>
         <td>
@@ -290,7 +290,7 @@
           <div class="action-group">
             <a href="{% url 'books:edit' book.pk %}" class="btn-table-edit">수정</a>
             <form method="post" action="{% url 'books:delete' book.pk %}" style="display:contents;"
-                  onsubmit="return confirm('도서 [{{ book.book_code }}] {{ book.book_list.title }}을(를) 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.')">
+                  onsubmit="return confirm('도서 [{{ book.book_code }}] {{ book.title }}을(를) 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.')">
               {% csrf_token %}
               <button type="submit" class="btn-table-delete">삭제</button>
             </form>

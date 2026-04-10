@@ -280,9 +280,9 @@ def _schedule_embedding_refresh(book_list_pk: int) -> None:
 def book_collect(request, pk):
     """개별 도서 데이터 수집 (AJAX). force=true이면 기존 데이터 덮어쓰기."""
     book = get_object_or_404(Book, pk=pk)
-    import json as _json
+    import json
     try:
-        body = _json.loads(request.body or "{}")
+        body = json.loads(request.body or "{}")
     except Exception:
         body = {}
     force = body.get("force", False)

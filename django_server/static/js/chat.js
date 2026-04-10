@@ -293,28 +293,17 @@ function closeModal() {
 
 // ── 새 대화 / 대화 초기화 ─────────────────────────────────
 
+// 새 대화 시작 — 페이지를 새로고침하면 서버에서 항상 새 세션을 생성합니다.
 btnNewChat.addEventListener("click", () => {
   if (!confirm("새 대화를 시작할까요?")) return;
-  document.cookie = "readme_chat_session=; Max-Age=0; path=/;";
   location.reload();
 });
 
+// 대화 초기화 — 화면의 메시지를 지우고 서버에서 새 세션을 발급받습니다.
 if (btnResetChat) {
   btnResetChat.addEventListener("click", () => {
     if (!confirm("대화 내용을 모두 초기화할까요?")) return;
-    // 화면에서 모든 메시지 제거 후 초기 메시지만 표시
-    chatMessages.innerHTML = `
-      <div class="msg msg--assistant">
-        <div class="msg-avatar">AI</div>
-        <div class="msg-body">
-          <div class="msg-bubble">
-            안녕하세요! 수강생님<br>
-            기본적인 도서 질문, 주제 로드맵, 수준 별 도서 질문과 같은 도서와 연관된 질문을 해주세요.
-          </div>
-        </div>
-      </div>`;
-    // 세션 쿠키 제거
-    document.cookie = "readme_chat_session=; Max-Age=0; path=/;";
+    location.reload();
   });
 }
 
