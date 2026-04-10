@@ -20,13 +20,12 @@ def _load_system_prompt() -> str:
     )
 
 
-async def roadmap_chain(inputs: dict) -> str:
+def _build_messages(inputs: dict) -> list:
     question = inputs["question"]
     books = inputs.get("books", [])
-    history = inputs.get("history", [])
 
     book_list = "\n".join(
-        f"- [{b['book_id']}] {b['title']} (난이도: {b.get('difficulty', '미분류')})"
+        f"- [{b['book_list_id']}] {b['title']} (난이도: {b.get('difficulty', '미분류')})"
         for b in books
     )
 
@@ -38,12 +37,20 @@ async def roadmap_chain(inputs: dict) -> str:
 위 도서 목록을 활용하여 단계별 학습 로드맵을 작성해주세요.
 각 단계마다 적합한 도서를 추천하고, 왜 그 도서가 해당 단계에 적합한지 설명해주세요."""
 
-    messages = [SystemMessage(content=_load_system_prompt())]
-    for h in history[-6:]:
-        if h["role"] == "user":
-            messages.append(HumanMessage(content=h["content"]))
-    messages.append(HumanMessage(content=user_content))
+    return [
+        SystemMessage(content=_load_system_prompt()),
+        HumanMessage(content=user_content),
+    ]
 
+
+async def roadmap_chain(inputs: dict) -> str:
     llm = get_llm()
-    response = await llm.ainvoke(messages)
+    response = await llm.ainvoke(_build_messages(inputs))
     return response.content
+
+
+async def roadmap_chain_stream(inputs: dict):
+    """토큰 단위로 스트리밍하는 async generator."""
+    llm = get_llm()
+    async for chunk in llm.astream(_build_messages(inputs)):
+        yield chunk.content

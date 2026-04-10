@@ -19,13 +19,12 @@ def _load_system_prompt() -> str:
     )
 
 
-async def level_based_chain(inputs: dict) -> str:
+def _build_messages(inputs: dict) -> list:
     question = inputs["question"]
     books = inputs.get("books", [])
-    history = inputs.get("history", [])
 
     book_list = "\n".join(
-        f"- [{b['book_id']}] {b['title']} (난이도: {b.get('difficulty', '미분류')})"
+        f"- [{b['book_list_id']}] {b['title']} (난이도: {b.get('difficulty', '미분류')})"
         for b in books
     )
 
@@ -36,12 +35,20 @@ async def level_based_chain(inputs: dict) -> str:
 
 사용자의 수준에 맞는 도서를 추천해주세요. 각 도서의 특징과 이 수준에 적합한 이유를 설명해주세요."""
 
-    messages = [SystemMessage(content=_load_system_prompt())]
-    for h in history[-6:]:
-        if h["role"] == "user":
-            messages.append(HumanMessage(content=h["content"]))
-    messages.append(HumanMessage(content=user_content))
+    return [
+        SystemMessage(content=_load_system_prompt()),
+        HumanMessage(content=user_content),
+    ]
 
+
+async def level_based_chain(inputs: dict) -> str:
     llm = get_llm()
-    response = await llm.ainvoke(messages)
+    response = await llm.ainvoke(_build_messages(inputs))
     return response.content
+
+
+async def level_based_chain_stream(inputs: dict):
+    """토큰 단위로 스트리밍하는 async generator."""
+    llm = get_llm()
+    async for chunk in llm.astream(_build_messages(inputs)):
+        yield chunk.content

@@ -4,7 +4,7 @@ import logging
 
 import httpx
 from django.conf import settings
-from django.http import JsonResponse
+from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_POST
 
@@ -47,17 +47,13 @@ def send_message(request):
         return JsonResponse({"error": "메시지를 입력해주세요."}, status=400)
 
     session = _get_or_create_session(request)
-
     user_msg = ChatMessage.objects.create(session=session, role=ChatMessage.Role.USER, content=user_content)
-
-    history = list(
-        session.messages.exclude(pk=user_msg.pk).order_by("-created_at")[:10].values("role", "content")
-    )[::-1]
 
     try:
         resp = httpx.post(
             f"{settings.MODEL_SERVER_URL}/chat/message",
-            json={"message": user_content, "history": history, "session_id": str(session.pk)},
+            # 싱글턴: history 없이 전송
+            json={"message": user_content, "history": [], "session_id": str(session.pk)},
             timeout=60,
         )
         resp.raise_for_status()
@@ -75,7 +71,6 @@ def send_message(request):
 
     recommendations_out = []
     for rec in data.get("recommendations", []):
-        # FastAPI는 book_list_id를 book_list_id 키로 반환
         book_list_id = rec.get("book_list_id")
         if not book_list_id:
             continue
@@ -106,5 +101,126 @@ def send_message(request):
         "question_type": assistant_msg.question_type,
         "recommendations": recommendations_out,
     })
-    response.set_cookie(SESSION_COOKIE, str(session.pk), max_age=60 * 60 * 24 * 30, httponly=True, samesite="Lax")
+    response.set_cookie(SESSION_COOKIE, str(session.pk), max_age=60 * 60 * 24, httponly=True, samesite="Lax")
     return response
+
+
+@require_POST
+def stream_message(request):
+    """FastAPI SSE 스트림을 프록시하여 브라우저에 전달합니다."""
+    try:
+        body = json.loads(request.body)
+        user_content = body.get("message", "").strip()
+    except (json.JSONDecodeError, AttributeError):
+        return JsonResponse({"error": "잘못된 요청입니다."}, status=400)
+
+    if not user_content:
+        return JsonResponse({"error": "메시지를 입력해주세요."}, status=400)
+
+    session = _get_or_create_session(request)
+    user_msg = ChatMessage.objects.create(session=session, role=ChatMessage.Role.USER, content=user_content)
+
+    # 스트리밍 중 누적할 응답
+    accumulated = {"answer": "", "question_type": "", "recommendations": []}
+
+    def generate():
+        try:
+            with httpx.stream(
+                "POST",
+                f"{settings.MODEL_SERVER_URL}/chat/message/stream",
+                json={"message": user_content, "history": [], "session_id": str(session.pk)},
+                timeout=httpx.Timeout(60.0, connect=10.0),
+            ) as r:
+                for line in r.iter_lines():
+                    if not line:
+                        continue
+
+                    if line.startswith("data: "):
+                        try:
+                            event = json.loads(line[6:])
+                            etype = event.get("type")
+                            if etype == "answer_chunk":
+                                accumulated["answer"] += event.get("content", "")
+                                yield line + "\n\n"
+                            elif etype == "done":
+                                accumulated["question_type"] = event.get("question_type", "")
+                                raw_recs = event.get("recommendations", [])
+                                accumulated["recommendations"] = raw_recs
+                                # 도서 상세 정보를 DB에서 조회하여 enriched done 이벤트 전송
+                                enriched = _enrich_recommendations(raw_recs)
+                                done_payload = json.dumps({
+                                    "type": "done",
+                                    "question_type": accumulated["question_type"],
+                                    "recommendations": enriched,
+                                }, ensure_ascii=False)
+                                yield f"data: {done_payload}\n\n"
+                            else:
+                                yield line + "\n\n"
+                        except Exception:
+                            yield line + "\n\n"
+                    else:
+                        yield line + "\n\n"
+
+        except Exception as exc:
+            logger.error("FastAPI 스트리밍 오류: %s", exc)
+            error_payload = json.dumps({"type": "error", "content": "AI 서버에 연결할 수 없습니다."})
+            yield f"data: {error_payload}\n\n"
+        finally:
+            _save_stream_result(session, user_msg, accumulated)
+
+    response = StreamingHttpResponse(generate(), content_type="text/event-stream")
+    response["Cache-Control"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"
+    response.set_cookie(SESSION_COOKIE, str(session.pk), max_age=60 * 60 * 24, httponly=True, samesite="Lax")
+    return response
+
+
+def _enrich_recommendations(raw_recs: list) -> list:
+    """book_list_id → Book 조회 후 프런트엔드에 필요한 전체 필드 반환."""
+    result = []
+    for rec in raw_recs:
+        book_list_id = rec.get("book_list_id")
+        if not book_list_id:
+            continue
+        book = Book.objects.filter(book_list_id=book_list_id, is_active=True).select_related(
+            "book_list__publisher", "book_list__author"
+        ).first()
+        if not book:
+            continue
+        result.append({
+            "id": book.pk,
+            "title": book.book_list.title,
+            "author": book.book_list.get_author_display(),
+            "publisher": book.book_list.publisher.name,
+            "difficulty": book.book_list.difficulty,
+            "thumbnail_url": book.book_list.thumbnail_url,
+            "rank": rec.get("rank", 1),
+            "score": rec.get("score", 0.0),
+        })
+    return result
+
+
+def _save_stream_result(session: ChatSession, user_msg: ChatMessage, accumulated: dict) -> None:
+    """스트리밍 완료 후 어시스턴트 메시지와 추천 도서를 DB에 저장합니다."""
+    try:
+        assistant_msg = ChatMessage.objects.create(
+            session=session,
+            role=ChatMessage.Role.ASSISTANT,
+            content=accumulated["answer"],
+            question_type=accumulated["question_type"],
+        )
+        for rec in accumulated["recommendations"]:
+            book_list_id = rec.get("book_list_id")
+            if not book_list_id:
+                continue
+            book = Book.objects.filter(book_list_id=book_list_id, is_active=True).first()
+            if not book:
+                continue
+            ChatRecommendation.objects.create(
+                message=assistant_msg,
+                book=book,
+                similarity_score=rec.get("score", 0.0),
+                rank=rec.get("rank", 1),
+            )
+    except Exception as exc:
+        logger.error("스트리밍 결과 저장 오류: %s", exc)

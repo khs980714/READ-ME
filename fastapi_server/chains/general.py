@@ -19,26 +19,33 @@ def _load_system_prompt() -> str:
     )
 
 
-async def general_chain(inputs: dict) -> str:
+def _build_messages(inputs: dict) -> list:
     question = inputs["question"]
     books = inputs.get("books", [])
-    history = inputs.get("history", [])
 
     book_list = "\n".join(
-        f"- [{b['book_id']}] {b['title']} (난이도: {b.get('difficulty', '미분류')})"
+        f"- [{b['book_list_id']}] {b['title']} (난이도: {b.get('difficulty', '미분류')})"
         for b in books
-    ) if books else ""
+    )
 
     user_content = question
     if book_list:
         user_content += f"\n\n참고할 수 있는 도서 목록:\n{book_list}"
 
-    messages = [SystemMessage(content=_load_system_prompt())]
-    for h in history[-6:]:
-        if h["role"] == "user":
-            messages.append(HumanMessage(content=h["content"]))
-    messages.append(HumanMessage(content=user_content))
+    return [
+        SystemMessage(content=_load_system_prompt()),
+        HumanMessage(content=user_content),
+    ]
 
+
+async def general_chain(inputs: dict) -> str:
     llm = get_llm()
-    response = await llm.ainvoke(messages)
+    response = await llm.ainvoke(_build_messages(inputs))
     return response.content
+
+
+async def general_chain_stream(inputs: dict):
+    """토큰 단위로 스트리밍하는 async generator."""
+    llm = get_llm()
+    async for chunk in llm.astream(_build_messages(inputs)):
+        yield chunk.content

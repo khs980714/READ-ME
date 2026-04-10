@@ -41,8 +41,17 @@
         </div>
       </li>
     </ul>
+    <!-- 스트리밍 토글 -->
+    <div class="stream-toggle-row">
+      <span class="stream-label">스트리밍 응답</span>
+      <label class="stream-switch">
+        <input type="checkbox" id="streamToggle">
+        <span class="stream-slider"></span>
+      </label>
+      <span class="stream-status" id="streamStatus">OFF</span>
+    </div>
+
     <div class="sidebar-actions">
-      <button class="btn-ghost btn-new-chat" id="btnNewChat">새 대화 시작</button>
       <button class="btn-ghost btn-reset-chat" id="btnResetChat">대화 초기화</button>
     </div>
   </aside>
@@ -100,6 +109,7 @@
 <script>
   const CHAT_HISTORY = {{ history|safe }};
   const SEND_URL = "{% url 'chat:send_message' %}";
+  const STREAM_URL = "{% url 'chat:stream_message' %}";
   const CSRF_TOKEN = "{{ csrf_token }}";
   const BOOK_DETAIL_URL = "/books/{id}/";
 </script>
