@@ -1,8 +1,12 @@
 import json as _json
+import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
+from openai import RateLimitError
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 from chains.career_certification import career_certification_chain, career_certification_chain_stream
 from chains.classifier import classify_question
@@ -122,21 +126,29 @@ def _build_recommendations(retrieved: list) -> list[RecItem]:
     ]
 
 
+_RATE_LIMIT_MSG = "AI 서버가 잠시 바쁩니다. 잠시 후 다시 시도해주세요."
+
+
 @router.post("/message", response_model=ChatResponse)
 async def chat_message(req: ChatRequest):
-    # 1) 분류 → 검색
-    question_type, retrieved, chain_input = await _classify_and_retrieve(req)
+    try:
+        # 1) 분류 → 검색
+        question_type, retrieved, chain_input = await _classify_and_retrieve(req)
 
-    # 2) 범위 외 질문 처리
-    if question_type == "out_of_scope":
-        return ChatResponse(answer=_OUT_OF_SCOPE_MSG, question_type="out_of_scope")
+        # 2) 범위 외 질문 처리
+        if question_type == "out_of_scope":
+            return ChatResponse(answer=_OUT_OF_SCOPE_MSG, question_type="out_of_scope")
 
-    # 3) 검색 결과 없음 처리 (LLM 호출 없이 즉시 반환)
-    if not retrieved:
-        return ChatResponse(answer=_NO_RESULTS_MSG, question_type=question_type)
+        # 3) 검색 결과 없음 처리 (LLM 호출 없이 즉시 반환)
+        if not retrieved:
+            return ChatResponse(answer=_NO_RESULTS_MSG, question_type=question_type)
 
-    # 4) 체인 실행
-    answer = await _run_chain(question_type, chain_input)
+        # 4) 체인 실행
+        answer = await _run_chain(question_type, chain_input)
+
+    except RateLimitError:
+        logger.warning("NVIDIA NIM 429 Rate Limit")
+        raise HTTPException(status_code=429, detail=_RATE_LIMIT_MSG)
 
     return ChatResponse(
         answer=answer,
@@ -150,8 +162,13 @@ async def chat_message_stream(req: ChatRequest):
     """SSE 스트리밍 응답 엔드포인트."""
 
     async def generate():
-        # 1) 분류 → 검색
-        question_type, retrieved, chain_input = await _classify_and_retrieve(req)
+        try:
+            # 1) 분류 → 검색
+            question_type, retrieved, chain_input = await _classify_and_retrieve(req)
+        except RateLimitError:
+            logger.warning("NVIDIA NIM 429 Rate Limit (stream/classify)")
+            yield f"data: {_json.dumps({'type': 'error', 'content': _RATE_LIMIT_MSG}, ensure_ascii=False)}\n\n"
+            return
 
         # 2) 범위 외 질문 처리
         if question_type == "out_of_scope":
@@ -166,9 +183,14 @@ async def chat_message_stream(req: ChatRequest):
             return
 
         # 4) 체인 스트리밍
-        async for chunk in _get_stream_gen(question_type, chain_input):
-            if chunk:
-                yield f"data: {_json.dumps({'type': 'answer_chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+        try:
+            async for chunk in _get_stream_gen(question_type, chain_input):
+                if chunk:
+                    yield f"data: {_json.dumps({'type': 'answer_chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+        except RateLimitError:
+            logger.warning("NVIDIA NIM 429 Rate Limit (stream/chain)")
+            yield f"data: {_json.dumps({'type': 'error', 'content': _RATE_LIMIT_MSG}, ensure_ascii=False)}\n\n"
+            return
 
         # 5) 완료 + 추천 도서
         recommendations = [
