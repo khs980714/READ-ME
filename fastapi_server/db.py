@@ -8,7 +8,9 @@ PostgreSQL 연결 (psycopg2 + pgvector)
 """
 
 import asyncio
+import re
 from contextlib import contextmanager
+from datetime import datetime
 
 import psycopg2
 import psycopg2.pool
@@ -84,6 +86,42 @@ def _rows_to_dicts(rows) -> list[dict]:
     ]
 
 
+# 제목에서 연도를 추출하기 위한 패턴 (2020~2039 범위)
+_YEAR_RE = re.compile(r"20[2-3]\d")
+
+
+def _recency_sort_key(book: dict) -> float:
+    """최신 도서 우선 정렬을 위한 정렬 키.
+
+    도서 제목에서 연도를 추출하여 현재 연도 기준 가중치를 더합니다.
+    원본 score는 변경하지 않고 정렬 키로만 사용합니다.
+
+    가중치 기준 (현재 연도 = 2026 기준 예시):
+      2026 이상 → +0.05 (현재 연도)
+      2025      → +0.03 (1년 전)
+      2024~2023 → +0.01 (2~3년 전)
+      2022 이하 / 연도 없음 → +0.00
+    """
+    match = _YEAR_RE.search(book["title"])
+    if not match:
+        return book["score"]
+
+    current_year = datetime.now().year
+    title_year = int(match.group())
+    diff = title_year - current_year
+
+    if diff >= 0:
+        boost = 0.05
+    elif diff == -1:
+        boost = 0.03
+    elif diff >= -3:
+        boost = 0.01
+    else:
+        boost = 0.00
+
+    return book["score"] + boost
+
+
 def _vector_search_sync(
     query_embedding: list[float],
     threshold: float,
@@ -102,7 +140,10 @@ def _vector_search_sync(
         with conn.cursor() as cur:
             cur.execute(sql, params)
             rows = cur.fetchall()
-    return _rows_to_dicts(rows)
+
+    books = _rows_to_dicts(rows)
+    # 유사도 점수 기준으로 먼저 가져온 뒤, 최신 연도 도서 우선 재정렬
+    return sorted(books, key=_recency_sort_key, reverse=True)
 
 
 def _upsert_embedding_sync(book_list_id: int, embedding: list[float]) -> None:
