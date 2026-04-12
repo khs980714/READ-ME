@@ -62,6 +62,71 @@ def vector_search(query_embedding: list[float], threshold: float, limit: int) ->
     ]
 
 
+def vector_search_by_difficulty(
+    query_embedding: list[float],
+    threshold: float,
+    limit: int,
+    difficulty: str | None = None,
+) -> list[dict]:
+    """난이도 메타데이터 필터 포함 코사인 유사도 기반 도서 벡터 검색."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if difficulty:
+                cur.execute(
+                    """
+                    SELECT
+                        bl.id,
+                        bl.title,
+                        bl.difficulty,
+                        bl.thumbnail_url,
+                        1 - (be.embedding <=> %s::vector) AS score
+                    FROM book_embeddings be
+                    JOIN book_list bl ON bl.id = be.book_list_id
+                    WHERE EXISTS (
+                        SELECT 1 FROM books b
+                        WHERE b.book_list_id = bl.id AND b.is_active = true
+                    )
+                      AND bl.difficulty = %s
+                      AND 1 - (be.embedding <=> %s::vector) >= %s
+                    ORDER BY score DESC
+                    LIMIT %s
+                    """,
+                    (query_embedding, difficulty, query_embedding, threshold, limit),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT
+                        bl.id,
+                        bl.title,
+                        bl.difficulty,
+                        bl.thumbnail_url,
+                        1 - (be.embedding <=> %s::vector) AS score
+                    FROM book_embeddings be
+                    JOIN book_list bl ON bl.id = be.book_list_id
+                    WHERE EXISTS (
+                        SELECT 1 FROM books b
+                        WHERE b.book_list_id = bl.id AND b.is_active = true
+                    )
+                      AND 1 - (be.embedding <=> %s::vector) >= %s
+                    ORDER BY score DESC
+                    LIMIT %s
+                    """,
+                    (query_embedding, query_embedding, threshold, limit),
+                )
+            rows = cur.fetchall()
+    return [
+        {
+            "book_list_id": r[0],
+            "title": r[1],
+            "difficulty": r[2],
+            "thumbnail_url": r[3],
+            "score": float(r[4]),
+        }
+        for r in rows
+    ]
+
+
 def upsert_embedding(book_list_id: int, embedding: list[float]) -> None:
     """book_embeddings upsert (book_list 단위)."""
     with get_conn() as conn:

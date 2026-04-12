@@ -503,6 +503,45 @@
   text-decoration: underline;
 }
 
+/* ── Markdown Table ──────────────────────────────────────── */
+.msg-bubble--markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 0.87rem;
+  overflow-x: auto;
+  display: block;
+}
+
+.msg-bubble--markdown thead {
+  background: var(--primary-light);
+}
+
+.msg-bubble--markdown th {
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 700;
+  color: var(--primary);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.msg-bubble--markdown td {
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  line-height: 1.55;
+  vertical-align: top;
+  word-break: keep-all;
+}
+
+.msg-bubble--markdown tr:nth-child(even) td {
+  background: rgba(80, 65, 151, 0.04);
+}
+
+.msg-bubble--markdown tr:hover td {
+  background: rgba(80, 65, 151, 0.08);
+}
+
 /* ── Responsive ──────────────────────────────────────────── */
 @media (max-width: 768px) {
   .chat-sidebar { display: none; }

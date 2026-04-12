@@ -16,8 +16,15 @@ class Settings(BaseSettings):
     LANGCHAIN_TRACING_V2: bool = True
     LANGCHAIN_PROJECT: str = "read-me"
 
-    # 추천 임계값
-    RECOMMENDATION_THRESHOLD: float = 0.5
+    # 추천 임계값 (질문 유형별)
+    # specific_search: 특정 기술·키워드 → 정밀 검색
+    RECOMMENDATION_THRESHOLD_SPECIFIC_SEARCH: float = 0.45
+    # goal_oriented: 진로·목적 기반 → 다양한 카테고리 도서 필요
+    RECOMMENDATION_THRESHOLD_GOAL_ORIENTED: float = 0.30
+    # career_certification: 자격증·포트폴리오
+    RECOMMENDATION_THRESHOLD_CAREER_CERTIFICATION: float = 0.38
+    # level_based: difficulty 필터 후 보완
+    RECOMMENDATION_THRESHOLD_LEVEL_BASED: float = 0.35
     RECOMMENDATION_MAX: int = 10
 
     # CORS

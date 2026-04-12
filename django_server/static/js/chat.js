@@ -179,7 +179,7 @@ async function handleStreamSend(content) {
 
           } else if (event.type === "done") {
             const qtype = event.question_type;
-            if (qtype && qtype !== "unrelated") {
+            if (qtype && qtype !== "out_of_scope") {
               const badge = document.createElement("span");
               badge.className = "qtype-badge";
               badge.textContent = qtypeLabel(qtype);
@@ -235,7 +235,7 @@ function appendMessage(msg) {
   const body = document.createElement("div");
   body.className = "msg-body";
 
-  if (msg.role === "assistant" && msg.question_type && msg.question_type !== "unrelated") {
+  if (msg.role === "assistant" && msg.question_type && msg.question_type !== "out_of_scope") {
     const badge = document.createElement("span");
     badge.className = "qtype-badge";
     badge.textContent = qtypeLabel(msg.question_type);
@@ -401,7 +401,12 @@ if (btnResetChat) {
 
 // ── 유틸 ────────────────────────────────────────────────
 function qtypeLabel(type) {
-  return { roadmap: "🗺️ 학습 로드맵", level_based: "📊 수준별 추천", general: "💬 도서 질문" }[type] || type;
+  return {
+    specific_search:     "🔍 기술·키워드 탐색",
+    goal_oriented:       "🗺️ 진로·목적 큐레이션",
+    career_certification:"🏆 자격증·포트폴리오",
+    level_based:         "📊 수준별 추천",
+  }[type] || type;
 }
 
 function setLoading(on) {
