@@ -25,7 +25,7 @@ async def retrieve_books(message: str, question_type: str) -> list:
         settings.RECOMMENDATION_THRESHOLD_SPECIFIC_SEARCH,
     )
     q_embedding = await get_embeddings(message, input_type="query")
-    return vector_search(
+    return await vector_search(
         query_embedding=q_embedding,
         threshold=threshold,
         limit=settings.RECOMMENDATION_MAX,
@@ -59,11 +59,11 @@ async def retrieve_books_level_based(
 
     # 난이도 감지 실패 → 전체 검색
     if not detected_level or detected_level not in DIFFICULTY_ORDER:
-        books = vector_search(q_embedding, threshold, limit)
+        books = await vector_search(q_embedding, threshold, limit)
         return books, None, None
 
     # 1) 요청 난이도 정확 검색
-    books = vector_search_by_difficulty(q_embedding, threshold, limit, detected_level)
+    books = await vector_search_by_difficulty(q_embedding, threshold, limit, detected_level)
     if books:
         return books, detected_level, None
 
@@ -72,7 +72,7 @@ async def retrieve_books_level_based(
     # 2) 더 쉬운 난이도로 fallback
     for i in range(idx - 1, -1, -1):
         fallback = DIFFICULTY_ORDER[i]
-        books = vector_search_by_difficulty(q_embedding, threshold, limit, fallback)
+        books = await vector_search_by_difficulty(q_embedding, threshold, limit, fallback)
         if books:
             return books, fallback, (
                 f"요청하신 **{detected_level}** 수준의 도서가 없어 "
@@ -82,7 +82,7 @@ async def retrieve_books_level_based(
     # 3) 더 어려운 난이도로 fallback
     for i in range(idx + 1, len(DIFFICULTY_ORDER)):
         fallback = DIFFICULTY_ORDER[i]
-        books = vector_search_by_difficulty(q_embedding, threshold, limit, fallback)
+        books = await vector_search_by_difficulty(q_embedding, threshold, limit, fallback)
         if books:
             return books, fallback, (
                 f"요청하신 **{detected_level}** 수준 및 더 쉬운 수준의 도서가 없어 "
@@ -90,7 +90,7 @@ async def retrieve_books_level_based(
             )
 
     # 4) 아무것도 없으면 전체 검색
-    books = vector_search(q_embedding, threshold, limit)
+    books = await vector_search(q_embedding, threshold, limit)
     return books, None, (
         f"요청하신 **{detected_level}** 수준의 도서를 찾지 못해 "
         f"전체 도서에서 유사도 높은 순으로 추천합니다."

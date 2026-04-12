@@ -52,14 +52,15 @@ def extract_difficulty_from_question(question: str) -> str | None:
     return None
 
 
-def _load_system_prompt() -> str:
-    if _PROMPT_PATH.exists():
-        return _PROMPT_PATH.read_text(encoding="utf-8")
-    return (
+_SYSTEM_PROMPT: str = (
+    _PROMPT_PATH.read_text(encoding="utf-8")
+    if _PROMPT_PATH.exists()
+    else (
         "당신은 IT·개발 도서 전문 큐레이터입니다. "
         "사용자의 현재 수준에 딱 맞는 도서를 추천하고, 각 도서가 왜 적합한지 설명해주세요. "
         "추천 도서는 반드시 제공된 목록에서만 선택하세요."
     )
+)
 
 
 def _build_messages(inputs: dict) -> list:
@@ -91,7 +92,7 @@ def _build_messages(inputs: dict) -> list:
 위 도서 목록을 바탕으로 추천해주세요.{' 응답 첫 줄에 [안내 사항]의 내용을 자연스럽게 사용자에게 먼저 전달해주세요.' if fallback_note else ''}"""
 
     return [
-        SystemMessage(content=_load_system_prompt()),
+        SystemMessage(content=_SYSTEM_PROMPT),
         *build_history_messages(history),
         HumanMessage(content=user_content),
     ]

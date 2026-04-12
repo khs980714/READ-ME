@@ -48,7 +48,7 @@ async def embed_book(req: EmbedBookRequest):
     """
     text = f"{req.title}\n{req.description}".strip()
     embedding = await get_embeddings(text)
-    upsert_embedding(req.book_list_id, embedding)
+    await upsert_embedding(req.book_list_id, embedding)
     return EmbedBookResponse(book_list_id=req.book_list_id, status="ok")
 
 

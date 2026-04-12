@@ -13,16 +13,16 @@ from llm import get_llm
 
 _PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "goal_oriented.txt"
 
-
-def _load_system_prompt() -> str:
-    if _PROMPT_PATH.exists():
-        return _PROMPT_PATH.read_text(encoding="utf-8")
-    return (
+_SYSTEM_PROMPT: str = (
+    _PROMPT_PATH.read_text(encoding="utf-8")
+    if _PROMPT_PATH.exists()
+    else (
         "당신은 IT·개발 분야 커리어 멘토입니다. "
         "사용자의 목표와 현재 상황을 분석하여 단계적으로 읽어야 할 도서를 큐레이션해주세요. "
         "자기개발 → IT 입문 → 포트폴리오/취업 준비 순서로 여러 카테고리를 조합한 로드맵 형식으로 구성하고, "
         "추천 도서는 반드시 제공된 목록에서만 선택하세요."
     )
+)
 
 
 def _build_messages(inputs: dict) -> list:
@@ -47,7 +47,7 @@ def _build_messages(inputs: dict) -> list:
 각 단계에 적합한 도서를 위 목록에서 선택하여 추천해주세요."""
 
     return [
-        SystemMessage(content=_load_system_prompt()),
+        SystemMessage(content=_SYSTEM_PROMPT),
         *build_history_messages(history),
         HumanMessage(content=user_content),
     ]

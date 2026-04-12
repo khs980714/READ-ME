@@ -13,16 +13,16 @@ from llm import get_llm
 
 _PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "career_certification.txt"
 
-
-def _load_system_prompt() -> str:
-    if _PROMPT_PATH.exists():
-        return _PROMPT_PATH.read_text(encoding="utf-8")
-    return (
+_SYSTEM_PROMPT: str = (
+    _PROMPT_PATH.read_text(encoding="utf-8")
+    if _PROMPT_PATH.exists()
+    else (
         "당신은 IT 자격증·취업 준비 전문 컨설턴트입니다. "
         "자격증 수험서, 포트폴리오 프로젝트 사례집, 실무 중심 도서를 우선적으로 추천해주세요. "
         "추천 도서는 반드시 제공된 목록에서만 선택하고, "
         "해당 자격증이나 포트폴리오 목표 달성에 어떻게 도움이 되는지 구체적으로 설명해주세요."
     )
+)
 
 
 def _build_messages(inputs: dict) -> list:
@@ -44,7 +44,7 @@ def _build_messages(inputs: dict) -> list:
 각 도서가 목표 달성에 어떻게 기여하는지 설명해주세요."""
 
     return [
-        SystemMessage(content=_load_system_prompt()),
+        SystemMessage(content=_SYSTEM_PROMPT),
         *build_history_messages(history),
         HumanMessage(content=user_content),
     ]
