@@ -5,7 +5,10 @@
 """
 
 from pathlib import Path
+
 from langchain_core.messages import HumanMessage, SystemMessage
+
+from chains.utils import build_history_messages
 from llm import get_llm
 
 _PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "goal_oriented.txt"
@@ -25,6 +28,7 @@ def _load_system_prompt() -> str:
 def _build_messages(inputs: dict) -> list:
     question = inputs["question"]
     books = inputs.get("books", [])
+    history = inputs.get("history", [])
 
     book_list = "\n".join(
         f"- [{b['book_list_id']}] {b['title']} (난이도: {b.get('difficulty', '미분류')})"
@@ -44,6 +48,7 @@ def _build_messages(inputs: dict) -> list:
 
     return [
         SystemMessage(content=_load_system_prompt()),
+        *build_history_messages(history),
         HumanMessage(content=user_content),
     ]
 

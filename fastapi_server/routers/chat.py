@@ -4,20 +4,23 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from chains.classifier import classify_question
-from chains.specific_search import specific_search_chain, specific_search_chain_stream
-from chains.goal_oriented import goal_oriented_chain, goal_oriented_chain_stream
 from chains.career_certification import career_certification_chain, career_certification_chain_stream
-from chains.level_based import level_based_chain, level_based_chain_stream, extract_difficulty_from_question
-from config import settings
-from db import vector_search, vector_search_by_difficulty
-from llm import get_embeddings
+from chains.classifier import classify_question
+from chains.goal_oriented import goal_oriented_chain, goal_oriented_chain_stream
+from chains.level_based import extract_difficulty_from_question, level_based_chain, level_based_chain_stream
+from chains.retriever import retrieve_books, retrieve_books_level_based
+from chains.specific_search import specific_search_chain, specific_search_chain_stream
 
 router = APIRouter()
 
 _OUT_OF_SCOPE_MSG = (
     "저는 IT·개발 및 자기개발 도서 추천 챗봇입니다. "
     "도서 추천, 학습 로드맵, 수준별 도서 안내 등 관련 질문을 해주시면 도와드리겠습니다!"
+)
+
+_NO_RESULTS_MSG = (
+    "질문과 관련된 도서를 찾지 못했습니다. "
+    "더 구체적인 기술명이나 주제어를 포함해서 다시 질문해 주세요."
 )
 
 
@@ -44,79 +47,102 @@ class ChatResponse(BaseModel):
     recommendations: list[RecItem] = []
 
 
-def _build_chain_input(req: ChatRequest, retrieved: list, detected_level: str | None = None) -> dict:
+def _build_chain_input(
+    req: ChatRequest,
+    retrieved: list,
+    detected_level: str | None = None,
+    actual_level: str | None = None,
+    fallback_note: str | None = None,
+) -> dict:
     return {
         "question": req.message,
         "history": [{"role": h.role, "content": h.content} for h in req.history],
         "books": retrieved,
         "detected_level": detected_level,
+        "actual_level": actual_level,
+        "fallback_note": fallback_note,
     }
 
 
-_THRESHOLD_MAP = {
-    "specific_search": lambda: settings.RECOMMENDATION_THRESHOLD_SPECIFIC_SEARCH,
-    "goal_oriented": lambda: settings.RECOMMENDATION_THRESHOLD_GOAL_ORIENTED,
-    "career_certification": lambda: settings.RECOMMENDATION_THRESHOLD_CAREER_CERTIFICATION,
-    "level_based": lambda: settings.RECOMMENDATION_THRESHOLD_LEVEL_BASED,
-}
+async def _classify_and_retrieve(req: ChatRequest) -> tuple[str, list, dict]:
+    """분류 → 벡터 검색 → chain_input 빌드.
 
-
-async def _retrieve_books(message: str, question_type: str, difficulty: str | None = None) -> list:
-    """질문 임베딩 → 벡터 검색.
-    - level_based: 난이도 필터 적용
-    - 질문 유형별 threshold 사용
+    Returns:
+        (question_type, retrieved_books, chain_input)
+        - out_of_scope인 경우 retrieved_books=[], chain_input={}
     """
-    threshold = _THRESHOLD_MAP.get(question_type, lambda: settings.RECOMMENDATION_THRESHOLD_SPECIFIC_SEARCH)()
-    q_embedding = await get_embeddings(message, input_type="query")
-    if difficulty:
-        return vector_search_by_difficulty(
-            query_embedding=q_embedding,
-            threshold=threshold,
-            limit=settings.RECOMMENDATION_MAX,
-            difficulty=difficulty,
-        )
-    return vector_search(
-        query_embedding=q_embedding,
-        threshold=threshold,
-        limit=settings.RECOMMENDATION_MAX,
-    )
-
-
-@router.post("/message", response_model=ChatResponse)
-async def chat_message(req: ChatRequest):
-    # 1) 질문 분류
     question_type = await classify_question(req.message)
 
-    # 2) 범위 외 질문 처리 (DB 검색 없음)
     if question_type == "out_of_scope":
-        return ChatResponse(answer=_OUT_OF_SCOPE_MSG, question_type="out_of_scope")
+        return question_type, [], {}
 
-    # 3) level_based: 난이도 추출 후 필터링 검색
-    detected_level = None
     if question_type == "level_based":
         detected_level = extract_difficulty_from_question(req.message)
+        retrieved, actual_level, fallback_note = await retrieve_books_level_based(
+            req.message, detected_level
+        )
+    else:
+        detected_level = None
+        actual_level = None
+        fallback_note = None
+        retrieved = await retrieve_books(req.message, question_type=question_type)
 
-    retrieved = await _retrieve_books(req.message, question_type=question_type, difficulty=detected_level)
+    chain_input = _build_chain_input(req, retrieved, detected_level, actual_level, fallback_note)
+    return question_type, retrieved, chain_input
 
-    # 4) 체인 선택 및 실행
-    chain_input = _build_chain_input(req, retrieved, detected_level)
 
+async def _run_chain(question_type: str, chain_input: dict) -> str:
+    """질문 유형에 맞는 체인을 실행해 응답 문자열을 반환합니다."""
     if question_type == "specific_search":
-        answer = await specific_search_chain(chain_input)
+        return await specific_search_chain(chain_input)
     elif question_type == "goal_oriented":
-        answer = await goal_oriented_chain(chain_input)
+        return await goal_oriented_chain(chain_input)
     elif question_type == "career_certification":
-        answer = await career_certification_chain(chain_input)
+        return await career_certification_chain(chain_input)
     else:  # level_based
-        answer = await level_based_chain(chain_input)
+        return await level_based_chain(chain_input)
 
-    # 5) 추천 도서 랭킹
-    recommendations = [
+
+def _get_stream_gen(question_type: str, chain_input: dict):
+    """질문 유형에 맞는 스트리밍 async generator를 반환합니다."""
+    if question_type == "specific_search":
+        return specific_search_chain_stream(chain_input)
+    elif question_type == "goal_oriented":
+        return goal_oriented_chain_stream(chain_input)
+    elif question_type == "career_certification":
+        return career_certification_chain_stream(chain_input)
+    else:  # level_based
+        return level_based_chain_stream(chain_input)
+
+
+def _build_recommendations(retrieved: list) -> list[RecItem]:
+    return [
         RecItem(book_list_id=b["book_list_id"], score=b["score"], rank=i + 1)
         for i, b in enumerate(retrieved)
     ]
 
-    return ChatResponse(answer=answer, question_type=question_type, recommendations=recommendations)
+
+@router.post("/message", response_model=ChatResponse)
+async def chat_message(req: ChatRequest):
+    # 1) 분류 → 검색
+    question_type, retrieved, chain_input = await _classify_and_retrieve(req)
+
+    # 2) 범위 외 질문 처리
+    if question_type == "out_of_scope":
+        return ChatResponse(answer=_OUT_OF_SCOPE_MSG, question_type="out_of_scope")
+
+    # 3) 검색 결과 없음 처리 (LLM 호출 없이 즉시 반환)
+    if not retrieved:
+        return ChatResponse(answer=_NO_RESULTS_MSG, question_type=question_type)
+
+    # 4) 체인 실행
+    answer = await _run_chain(question_type, chain_input)
+
+    return ChatResponse(
+        answer=answer,
+        question_type=question_type,
+        recommendations=_build_recommendations(retrieved),
+    )
 
 
 @router.post("/message/stream")
@@ -124,35 +150,23 @@ async def chat_message_stream(req: ChatRequest):
     """SSE 스트리밍 응답 엔드포인트."""
 
     async def generate():
-        # 1) 질문 분류
-        question_type = await classify_question(req.message)
+        # 1) 분류 → 검색
+        question_type, retrieved, chain_input = await _classify_and_retrieve(req)
 
-        # 2) 범위 외 질문 처리 (DB 검색 없음)
+        # 2) 범위 외 질문 처리
         if question_type == "out_of_scope":
             yield f"data: {_json.dumps({'type': 'answer_chunk', 'content': _OUT_OF_SCOPE_MSG}, ensure_ascii=False)}\n\n"
             yield f"data: {_json.dumps({'type': 'done', 'question_type': 'out_of_scope', 'recommendations': []})}\n\n"
             return
 
-        # 3) level_based: 난이도 추출 후 필터링 검색
-        detected_level = None
-        if question_type == "level_based":
-            detected_level = extract_difficulty_from_question(req.message)
-
-        retrieved = await _retrieve_books(req.message, question_type=question_type, difficulty=detected_level)
+        # 3) 검색 결과 없음 처리
+        if not retrieved:
+            yield f"data: {_json.dumps({'type': 'answer_chunk', 'content': _NO_RESULTS_MSG}, ensure_ascii=False)}\n\n"
+            yield f"data: {_json.dumps({'type': 'done', 'question_type': question_type, 'recommendations': []})}\n\n"
+            return
 
         # 4) 체인 스트리밍
-        chain_input = _build_chain_input(req, retrieved, detected_level)
-
-        if question_type == "specific_search":
-            stream_gen = specific_search_chain_stream(chain_input)
-        elif question_type == "goal_oriented":
-            stream_gen = goal_oriented_chain_stream(chain_input)
-        elif question_type == "career_certification":
-            stream_gen = career_certification_chain_stream(chain_input)
-        else:  # level_based
-            stream_gen = level_based_chain_stream(chain_input)
-
-        async for chunk in stream_gen:
+        async for chunk in _get_stream_gen(question_type, chain_input):
             if chunk:
                 yield f"data: {_json.dumps({'type': 'answer_chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
 
