@@ -455,6 +455,21 @@ def classify_difficulty(title: str, description: str, reviews: list[str]) -> str
         return None
 
 
+def classify_category(title: str, description: str) -> list[str]:
+    """FastAPI /embed/classify-category 호출 → 카테고리 이름 목록 반환."""
+    try:
+        resp = httpx.post(
+            f"{settings.MODEL_SERVER_URL}/embed/classify-category",
+            json={"title": title, "description": description},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json().get("categories", [])
+    except Exception as exc:
+        logger.warning("카테고리 분류 실패 (%s): %s", title, exc)
+        return []
+
+
 def generate_embedding(book_list_id: int, title: str, description: str) -> bool:
     """FastAPI /embed/book 호출 → book_embeddings 적재."""
     try:
@@ -472,8 +487,8 @@ def generate_embedding(book_list_id: int, title: str, description: str) -> bool:
 
 # ── 통합 파이프라인 ───────────────────────────────────────────
 
-def run_book_pipeline(
-    book, progress_callback=None, return_candidates: bool = False
+def run_booklist_pipeline(
+    book_list, progress_callback=None, return_candidates: bool = False
 ) -> list[dict] | None:
     """도서 데이터 수집 파이프라인 (BookList 단위 중복 방지):
 
@@ -486,7 +501,6 @@ def run_book_pipeline(
     """
     from .models import BookEmbedding
 
-    book_list = book.book_list
     author_name = book_list.get_author_display()
     update_fields = []
     aladin_candidates: list[dict] = []
@@ -550,6 +564,13 @@ def run_book_pipeline(
     if return_candidates:
         return aladin_candidates
     return None
+
+
+def run_book_pipeline(
+    book, progress_callback=None, return_candidates: bool = False
+) -> list[dict] | None:
+    """Book 인스턴스 기반 파이프라인 — BookList 단위로 위임 (하위 호환)."""
+    return run_booklist_pipeline(book.book_list, progress_callback, return_candidates)
 
 
 def collect_book_data(book_list, force: bool = False) -> dict:

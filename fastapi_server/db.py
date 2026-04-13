@@ -60,7 +60,8 @@ _VECTOR_SEARCH_SQL = """
         bl.difficulty,
         bl.thumbnail_url,
         1 - (be.embedding <=> %s::vector) AS score,
-        bl.publication_year
+        bl.publication_year,
+        (SELECT b.book_code FROM books b WHERE b.book_list_id = bl.id AND b.is_active = true ORDER BY b.book_code LIMIT 1) AS book_code
     FROM book_embeddings be
     JOIN book_list bl ON bl.id = be.book_list_id
     WHERE EXISTS (
@@ -83,6 +84,7 @@ def _rows_to_dicts(rows) -> list[dict]:
             "thumbnail_url":   r[3],
             "score":           float(r[4]),
             "publication_year": r[5],
+            "book_code":       r[6] or str(r[0]),
         }
         for r in rows
     ]

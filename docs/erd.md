@@ -28,16 +28,17 @@ erDiagram
     }
 
     book_list {
-        int     id              PK
-        varchar title
-        int     author_id       FK  "대표 저자"
-        int     publisher_id    FK
-        text    description
-        enum    difficulty          "입문|초급|중급|고급"
-        varchar isbn
-        text    thumbnail_url
-        date    published_at
-        int     page_count
+        int      id                  PK
+        varchar  title                   "판차 제거 정제 제목"
+        varchar  edition                 "(개정2판) 등 분리된 판차"
+        smallint publication_year        "제목·설명에서 추출한 연도"
+        int      author_id          FK   "대표 저자"
+        int      publisher_id       FK
+        text     description             "도서 소개 (max 2,000자)"
+        text     toc                     "목차 (max 3,000자)"
+        enum     difficulty              "입문|초급|중급|고급"
+        varchar  isbn
+        text     thumbnail_url
         timestamptz created_at
         timestamptz updated_at
     }
@@ -123,16 +124,31 @@ books       (1) ──── (N) chat_recommendations
 ## 데이터 흐름
 
 ```
-[CSV / 관리자 입력]
+[CSV 초기 적재 (1회)]
         │
         ▼
-   books 생성 (book_code, title, publisher_id)
+   load_books 커맨드
+     → publishers, authors upsert
+     → book_list 생성 (title + edition 분리, author_id, publisher_id)
+     → books 생성 (book_code D-NNN, book_list_id FK)
         │
-        ├──► Naver Book Search API ──► thumbnail_url, description, isbn, published_at
+        ▼
+   run_pipeline (BookList 단위, 이미 수집된 필드 건너뜀)
         │
-        ├──► 리뷰 스크래핑 ──► LLM 난이도 분류 ──► difficulty
+        ├──① 멀티소스 정보 수집
+        │     알라딘 API (TTB) ──► description, toc, isbn, thumbnail_url
+        │     YES24 스크래핑   ──► 누락 필드 보완
+        │     교보문고 스크래핑 ──► 누락 필드 보완
         │
-        └──► OpenAI Embedding API ──► book_embeddings (vector)
+        ├──② LLM 난이도 분류 (NVIDIA NIM)
+        │     title + description ──► difficulty (입문/초급/중급/고급)
+        │
+        └──③ 임베딩 생성 (NVIDIA nv-embedqa-e5-v5)
+              title + description ──► VECTOR(1024) ──► book_embeddings upsert
+
+[별도 파이프라인]
+   출판 연도 추출:    title / description ──► publication_year
+   카테고리 분류:    title + description ──► LLM ──► book_list_categories (1~3개)
 
 
 [사용자 챗봇 질문]

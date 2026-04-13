@@ -8,10 +8,13 @@
 
 **READ:ME**는 IT·개발 도서 목록을 제공하고, AI 챗봇과의 대화를 통해 사용자의 수준과 목표에 맞는 책을 추천해 주는 웹 서비스입니다.
 
-- 도서 썸네일·설명·난이도 정보를 한눈에 확인
+- 도서 썸네일·설명·목차·난이도·카테고리 정보를 한눈에 확인
 - 학습 로드맵, 수준별 추천, 일반 도서 질문에 응답하는 챗봇 (마크다운 렌더링 지원)
 - 관리자 전용 **데이터 수집 페이지** — 실시간 Progress Bar + 로그로 파이프라인 시각화
 - `book_list` 테이블로 중복 도서 수집 방지 (동일 책은 API 재호출 없이 재사용)
+- LLM 기반 **카테고리 자동 분류** — 도서 제목·설명을 분석해 12개 카테고리 중 1~3개 자동 태깅
+- **멀티소스 정보 수집** — 알라딘 API → YES24 → 교보문고 순 fallback으로 설명·목차 수집
+- **판차·출판 연도 자동 추출** — 제목에서 판차 정보 분리 저장, 연도 메타데이터 추출
 
 ---
 
@@ -96,22 +99,37 @@ READ-ME/
 |---|---|
 | `publishers` | 출판사 (정규화) |
 | `authors` | 저자 (정규화) |
-| `book_list` | **도서 정보 마스터** — (title, author, publisher) 조합으로 중복 방지 |
+| `categories` | 카테고리 (12종) |
+| `book_list` | **도서 정보 마스터** — `(title, edition, author, publisher)` 조합으로 중복 방지 |
 | `book_list_categories` | book_list ↔ categories 다대다 |
-| `books` | 도서 코드 레지스트리 — book_code + book_list_id FK |
+| `books` | 도서 코드 레지스트리 — book_code(`D-NNN`) + book_list_id FK |
 | `book_embeddings` | pgvector 임베딩 (dim=1024, book_list 단위) |
 | `chat_sessions` | 챗봇 세션 (UUID, 비로그인 지원) |
 | `chat_messages` | 대화 메시지 및 질문 유형 |
 | `chat_recommendations` | 응답 추천 도서 + 유사도 점수 |
 
+### `book_list` 주요 컬럼
+
+| 컬럼 | 설명 |
+|---|---|
+| `title` | 판차 제거 후 정제된 도서명 |
+| `edition` | 판차 정보 (`(개정2판)`, `(심화편)` 등, 제목에서 분리) |
+| `publication_year` | 출판 연도 (제목·설명에서 자동 추출, 4자리) |
+| `description` | 도서 소개 (최대 2,000자) |
+| `toc` | 목차 (최대 3,000자) |
+| `difficulty` | 난이도 (`입문` / `초급` / `중급` / `고급`) |
+| `isbn` | ISBN-13 |
+| `thumbnail_url` | 표지 이미지 URL |
+
 ### 중복 수집 방지 로직
 
-`book_list` 테이블의 `(title, author, publisher)` UNIQUE 제약으로 동일 책의 중복 수집을 방지합니다.
+`book_list` 테이블의 `(title, edition, author, publisher)` UNIQUE 제약으로 동일 책의 중복 수집을 방지합니다.
 
 파이프라인 실행 시:
-- `description`이 이미 있으면 Naver API 호출 **건너뜀**
+- `description` / `toc` / `thumbnail_url`이 이미 있으면 정보 수집 **건너뜀**
 - `difficulty`가 이미 있으면 LLM 난이도 분류 **건너뜀**
 - `book_embeddings`에 이미 존재하면 임베딩 생성 **건너뜀**
+- `categories`가 이미 연결되어 있으면 카테고리 분류 **건너뜀**
 
 ---
 
@@ -128,13 +146,44 @@ READ-ME/
 
 ---
 
+## 도서 카테고리
+
+LLM(NVIDIA NIM)이 도서 제목과 설명을 분석하여 아래 12개 카테고리 중 **1~3개**를 자동으로 태깅합니다.
+
+| 카테고리 | 설명 |
+|---|---|
+| 프로그래밍 언어 | Python, JavaScript, Java, C/C++, Go, Rust 등 언어별 도서 |
+| 웹 개발 | 프론트엔드(React, Vue 등) / 백엔드(Django, Spring, FastAPI 등) / 풀스택 |
+| 모바일 개발 | Android, iOS, Flutter, React Native 등 |
+| 데이터베이스 | SQL, NoSQL, DB 설계·최적화 |
+| 자료구조·알고리즘 | 코딩 테스트, 알고리즘 이론 |
+| 컴퓨터 과학 | 운영체제, 네트워크, 컴퓨터 구조, 컴파일러 |
+| 인공지능·데이터 | 머신러닝, 딥러닝, 데이터 분석, LLM·생성 AI |
+| DevOps·클라우드 | Docker, Kubernetes, CI/CD, AWS·GCP·Azure |
+| 소프트웨어 공학 | 클린 코드, 설계 패턴, 테스트, 아키텍처 |
+| 보안 | 정보보안, 웹 보안, 자격증(정보처리기사, CISSP 등) |
+| 자격증·취업 | 수험서, 면접 준비, 코딩 테스트 |
+| IT 교양 | 개발 문화, 스타트업, 비개발자 대상 IT 입문 |
+
+> 분류 결과는 `book_list_categories` 테이블에 저장되며, 웹 UI 파이프라인 페이지에서 일괄 처리할 수 있습니다.
+
+---
+
 ## 데이터 수집 파이프라인
 
 ### 방법 1 — 웹 UI (권장)
 
-관리자 계정으로 로그인 후 상단 **데이터 수집** 탭에서 버튼 클릭:
+관리자 계정으로 로그인 후 상단 **데이터 수집** 탭에서 각 버튼 클릭:
 - 실시간 Progress Bar로 진행 현황 확인
 - 도서별 성공/실패/에러 메시지 로그 표시
+
+| 파이프라인 | 설명 |
+|---|---|
+| 전체 수집 | 설명·목차·ISBN·썸네일 → 난이도 분류 → 임베딩 순으로 일괄 처리 |
+| 임베딩 누락 보정 | description 있으나 임베딩 없는 도서만 재처리 |
+| 난이도 분류 | difficulty 미분류 도서만 LLM으로 재분류 |
+| 출판 연도 추출 | publication_year 미등록 도서의 연도 자동 추출 |
+| 카테고리 분류 | categories 미태깅 도서만 LLM으로 카테고리 자동 분류 |
 
 ### 방법 2 — CLI
 
@@ -142,12 +191,25 @@ READ-ME/
 # 1단계: 도서 기본 정보 적재 (CSV → DB)
 docker compose exec backend python manage.py load_books
 
-# 2단계: Naver API · 난이도 분류 · 임베딩 순차 실행
+# 2단계: 정보 수집·난이도 분류·임베딩 일괄 실행
 docker compose exec backend python manage.py run_pipeline --all
 
 # 특정 도서만 실행
 docker compose exec backend python manage.py run_pipeline --book-id 1
 ```
+
+### 멀티소스 정보 수집 전략
+
+도서 설명·목차·썸네일은 아래 순서로 fallback 수집합니다.
+
+```
+1차: 알라딘 Open API (TTB) — 설명 + 목차(OptResult=toc) + ISBN + 썸네일
+2차: YES24 스크래핑           — 1차에서 누락된 설명·목차 보완
+3차: 교보문고 스크래핑        — 2차에서도 누락된 설명·목차 보완
+```
+
+- description 텍스트에 목차가 포함된 경우 **자동으로 설명/목차 분리**
+- 알라딘 후보 검색 결과에서 **수동으로 정확한 도서를 선택**하여 적용 가능 (웹 UI)
 
 ---
 
@@ -168,7 +230,8 @@ cp .env.example .env
 | `DJANGO_SUPERUSER_PASSWORD` | 관리자 비밀번호 |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | DB 접속 정보 |
 | `DATABASE_URL` | `postgresql://<USER>:<PW>@db:5432/<DB>` |
-| `NAVER_CLIENT_ID` / `NAVER_CLIENT_SECRET` | Naver Developers 앱 자격증명 |
+| `NAVER_CLIENT_ID` / `NAVER_CLIENT_SECRET` | Naver Developers 앱 자격증명 (도서 검색 팝오버용) |
+| `ALADIN_TTB_KEY` | 알라딘 Open API 키 (도서 정보·목차 수집 1차 소스) |
 | `NVIDIA_API_KEY` | NVIDIA NIM API 키 |
 | `NVIDIA_NIM_BASE_URL` / `NVIDIA_LLM_MODEL` / `NVIDIA_EMBEDDING_MODEL` | NVIDIA NIM 엔드포인트 |
 | `LANGCHAIN_API_KEY` | LangSmith 트레이싱 키 |

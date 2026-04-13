@@ -71,3 +71,64 @@ async def classify_difficulty(req: ClassifyRequest):
             return ClassifyResponse(difficulty=v)
 
     return ClassifyResponse(difficulty="중급")
+
+
+# ── 카테고리 분류 ──────────────────────────────────────────────
+
+VALID_CATEGORIES = [
+    "프로그래밍 언어",
+    "웹 개발",
+    "모바일 개발",
+    "데이터베이스",
+    "자료구조·알고리즘",
+    "컴퓨터 과학",
+    "인공지능·데이터",
+    "DevOps·클라우드",
+    "소프트웨어 공학",
+    "보안",
+    "자격증·취업",
+    "IT 교양",
+]
+
+CATEGORY_PROMPT = """다음 IT·개발 도서를 아래 카테고리 목록에서 가장 적합한 1~3개로 분류해주세요.
+반드시 아래 목록에 있는 카테고리명만 사용하고, 쉼표로 구분하여 답하세요. 설명 없이 카테고리명만 출력하세요.
+
+카테고리 목록:
+{categories}
+
+도서 제목: {title}
+도서 소개: {description}
+
+카테고리 (쉼표 구분):"""
+
+
+class ClassifyCategoryRequest(BaseModel):
+    title: str
+    description: str
+
+
+class ClassifyCategoryResponse(BaseModel):
+    categories: list[str]
+
+
+@router.post("/classify-category", response_model=ClassifyCategoryResponse)
+async def classify_category(req: ClassifyCategoryRequest):
+    """도서 정보를 LLM으로 분석하여 카테고리 목록 반환 (1~3개)."""
+    categories_str = "\n".join(f"- {c}" for c in VALID_CATEGORIES)
+    prompt = CATEGORY_PROMPT.format(
+        categories=categories_str,
+        title=req.title,
+        description=req.description[:500],
+    )
+    llm = get_llm()
+    response = await llm.ainvoke([HumanMessage(content=prompt)])
+    raw = response.content.strip()
+
+    result = []
+    for token in raw.replace("、", ",").split(","):
+        name = token.strip()
+        if name in VALID_CATEGORIES:
+            result.append(name)
+
+    # LLM이 유효 카테고리를 하나도 못 반환하면 IT 교양으로 fallback
+    return ClassifyCategoryResponse(categories=result if result else ["IT 교양"])

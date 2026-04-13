@@ -1,14 +1,19 @@
 """
 데이터 관리 파이프라인 웹 인터페이스
-- GET  /pipeline/                          → 관리자 전용 데이터 관리 페이지
-- POST /pipeline/run/                      → 전체 파이프라인 시작 (job_id 반환)
-- GET  /pipeline/stream/<job_id>/          → 파이프라인 SSE 스트림
-- POST /pipeline/embed/run/                → 임베딩 누락 도서 처리 시작 (job_id 반환)
-- GET  /pipeline/embed/stream/<job_id>/    → 임베딩 SSE 스트림
-- POST /pipeline/year/run/                 → 출판 연도 추출 시작 (job_id 반환)
-- GET  /pipeline/year/stream/<job_id>/     → 연도 추출 SSE 스트림
-- POST /pipeline/candidates/search/        → 알라딘 도서 후보 검색 (AJAX)
-- POST /pipeline/candidates/apply/         → 선택 후보 도서 정보 적용 (AJAX)
+- GET  /pipeline/                              → 관리자 전용 데이터 관리 페이지
+- POST /pipeline/run/                          → 전체 파이프라인 시작 (job_id 반환)
+- GET  /pipeline/stream/<job_id>/              → 파이프라인 SSE 스트림
+- POST /pipeline/stop/<job_id>/               → 실행 중인 작업 중단
+- POST /pipeline/embed/run/                    → 임베딩 누락 도서 처리 시작 (job_id 반환)
+- GET  /pipeline/embed/stream/<job_id>/        → 임베딩 SSE 스트림
+- POST /pipeline/classify/run/                 → 난이도 분류 시작 (job_id 반환)
+- GET  /pipeline/classify/stream/<job_id>/     → 난이도 분류 SSE 스트림
+- POST /pipeline/year/run/                     → 출판 연도 추출 시작 (job_id 반환)
+- GET  /pipeline/year/stream/<job_id>/         → 연도 추출 SSE 스트림
+- POST /pipeline/category/run/                 → 카테고리 분류 시작 (job_id 반환)
+- GET  /pipeline/category/stream/<job_id>/     → 카테고리 분류 SSE 스트림
+- POST /pipeline/candidates/search/            → 알라딘 도서 후보 검색 (AJAX)
+- POST /pipeline/candidates/apply/             → 선택 후보 도서 정보 적용 (AJAX)
 """
 
 import json
@@ -33,6 +38,18 @@ _year_jobs: dict[str, Queue] = {}
 _year_jobs_lock = threading.Lock()
 _year_running = threading.Event()     # 연도 추출 동시 실행 방지
 
+_classify_jobs: dict[str, Queue] = {}
+_classify_jobs_lock = threading.Lock()
+_classify_running = threading.Event()
+
+_category_jobs: dict[str, Queue] = {}
+_category_jobs_lock = threading.Lock()
+_category_running = threading.Event()
+
+# ── 취소 플래그 (job_id → Event) ─────────────────────────────
+_cancel_flags: dict[str, threading.Event] = {}
+_cancel_flags_lock = threading.Lock()
+
 
 def _staff_required(view_func):
     """관리자가 아니면 메인 페이지로 리다이렉트."""
@@ -44,10 +61,23 @@ def _staff_required(view_func):
     return wrapper
 
 
+def _register_cancel(job_id: str) -> threading.Event:
+    e = threading.Event()
+    with _cancel_flags_lock:
+        _cancel_flags[job_id] = e
+    return e
+
+
+def _unregister_cancel(job_id: str):
+    with _cancel_flags_lock:
+        _cancel_flags.pop(job_id, None)
+
+
 # ── 페이지 ────────────────────────────────────────────────────
 
 @_staff_required
 def pipeline_page(request):
+    from django.db.models import Count
     from books.models import Book, BookEmbedding, BookList
     total_books = Book.objects.filter(is_active=True).count()
     pending = BookList.objects.filter(description="").count()
@@ -62,13 +92,36 @@ def pipeline_page(request):
     unclassified = BookList.objects.exclude(description="").filter(difficulty="").count()
     # publication_year 미등록
     missing_year = BookList.objects.filter(publication_year__isnull=True).count()
+    # description 있음 + 카테고리 없음
+    missing_category = (
+        BookList.objects
+        .exclude(description="")
+        .annotate(cat_count=Count("categories"))
+        .filter(cat_count=0)
+        .count()
+    )
     return render(request, "data_pipeline/index.html", {
-        "total_books":   total_books,
-        "pending":       pending,
-        "missing_embed": missing_embed,
-        "unclassified":  unclassified,
-        "missing_year":  missing_year,
+        "total_books":      total_books,
+        "pending":          pending,
+        "missing_embed":    missing_embed,
+        "unclassified":     unclassified,
+        "missing_year":     missing_year,
+        "missing_category": missing_category,
     })
+
+
+# ── 작업 중단 ─────────────────────────────────────────────────
+
+@_staff_required
+@require_POST
+def stop_job(request, job_id: str):
+    """실행 중인 파이프라인 작업을 중단 요청."""
+    with _cancel_flags_lock:
+        e = _cancel_flags.get(job_id)
+    if e:
+        e.set()
+        return JsonResponse({"ok": True})
+    return JsonResponse({"error": "실행 중인 작업이 없습니다."}, status=404)
 
 
 # ── 전체 파이프라인 ───────────────────────────────────────────
@@ -83,7 +136,9 @@ def _parse_force(request) -> bool:
 @_staff_required
 @require_POST
 def run_pipeline(request):
-    """전체 파이프라인 시작. job_id를 반환하고 백그라운드에서 실행."""
+    """전체 파이프라인 시작. job_id를 반환하고 백그라운드에서 실행.
+    BookList(중복 제거된 도서 정보) 단위로 처리합니다.
+    """
     if _running.is_set():
         if not _parse_force(request):
             return JsonResponse({"error": "이미 파이프라인이 실행 중입니다."}, status=409)
@@ -91,51 +146,55 @@ def run_pipeline(request):
 
     job_id = str(uuid.uuid4())
     q: Queue = Queue()
+    cancel_event = _register_cancel(job_id)
     with _jobs_lock:
         _jobs[job_id] = q
 
-    threading.Thread(target=_pipeline_worker, args=(job_id, q), daemon=True).start()
+    threading.Thread(target=_pipeline_worker, args=(job_id, q, cancel_event), daemon=True).start()
     return JsonResponse({"job_id": job_id})
 
 
-def _pipeline_worker(job_id: str, q: Queue):
+def _pipeline_worker(job_id: str, q: Queue, cancel_event: threading.Event):
     _running.set()
     try:
-        from books.models import Book
-        from books.services import run_book_pipeline
+        from books.models import BookList
+        from books.services import run_booklist_pipeline
 
-        books = list(
-            Book.objects.filter(is_active=True)
-            .select_related("book_list__author", "book_list__publisher")
-            .order_by("book_code")
+        # books 테이블이 아닌 book_list(중복 없는 도서 정보) 기준으로 처리
+        book_lists = list(
+            BookList.objects
+            .select_related("author", "publisher")
+            .order_by("title")
         )
-        total = len(books)
+        total = len(book_lists)
         q.put({"type": "start", "total": total})
 
         done = errors = 0
-        for book in books:
-            title = book.book_list.full_title
-            book_code = book.book_code
-            book_list_id = book.book_list.pk
+        for bl in book_lists:
+            if cancel_event.is_set():
+                q.put({"type": "cancelled", "done": done, "total": total})
+                break
+
+            title = bl.full_title
+            book_list_id = bl.pk
             q.put({"type": "progress", "done": done, "total": total,
-                   "current": f"[{book_code}] {title}"})
+                   "current": title})
 
             log_messages = []
-            def progress_cb(msg, _bc=book_code, _t=title):
+            def progress_cb(msg):
                 log_messages.append(msg)
 
             try:
-                candidates = run_book_pipeline(
-                    book, progress_callback=progress_cb, return_candidates=True
+                candidates = run_booklist_pipeline(
+                    bl, progress_callback=progress_cb, return_candidates=True
                 )
                 done += 1
                 q.put({"type": "log", "status": "success",
-                       "book_code": book_code, "title": title, "messages": log_messages})
+                       "title": title, "messages": log_messages})
                 # 알라딘 후보가 2개 이상이면 도서 선택 이벤트 emit
                 if candidates and len(candidates) > 1:
                     q.put({
                         "type": "candidates",
-                        "book_code": book_code,
                         "title": title,
                         "book_list_id": book_list_id,
                         "candidates": candidates,
@@ -143,15 +202,16 @@ def _pipeline_worker(job_id: str, q: Queue):
             except Exception as e:
                 errors += 1
                 q.put({"type": "log", "status": "error",
-                       "book_code": book_code, "title": title,
-                       "error": str(e), "messages": log_messages})
+                       "title": title, "error": str(e), "messages": log_messages})
 
-        q.put({"type": "complete", "done": done, "errors": errors, "total": total})
+        if not cancel_event.is_set():
+            q.put({"type": "complete", "done": done, "errors": errors, "total": total})
     except Exception as e:
         q.put({"type": "fatal", "error": str(e)})
     finally:
         q.put(None)
         _running.clear()
+        _unregister_cancel(job_id)
 
 
 def pipeline_stream(request, job_id: str):
@@ -183,14 +243,15 @@ def run_embed_missing(request):
 
     job_id = str(uuid.uuid4())
     q: Queue = Queue()
+    cancel_event = _register_cancel(job_id)
     with _embed_jobs_lock:
         _embed_jobs[job_id] = q
 
-    threading.Thread(target=_embed_worker, args=(job_id, q, targets), daemon=True).start()
+    threading.Thread(target=_embed_worker, args=(job_id, q, targets, cancel_event), daemon=True).start()
     return JsonResponse({"job_id": job_id})
 
 
-def _embed_worker(job_id: str, q: Queue, targets: list):
+def _embed_worker(job_id: str, q: Queue, targets: list, cancel_event: threading.Event):
     _embed_running.set()
     try:
         from books.services import refresh_embedding
@@ -200,6 +261,10 @@ def _embed_worker(job_id: str, q: Queue, targets: list):
 
         done = errors = 0
         for bl in targets:
+            if cancel_event.is_set():
+                q.put({"type": "cancelled", "done": done, "total": total})
+                break
+
             q.put({"type": "progress", "done": done, "total": total, "current": bl.title})
             try:
                 refresh_embedding(bl)
@@ -210,12 +275,14 @@ def _embed_worker(job_id: str, q: Queue, targets: list):
                 q.put({"type": "log", "status": "error",
                        "title": bl.title, "error": str(e)})
 
-        q.put({"type": "complete", "done": done, "errors": errors, "total": total})
+        if not cancel_event.is_set():
+            q.put({"type": "complete", "done": done, "errors": errors, "total": total})
     except Exception as e:
         q.put({"type": "fatal", "error": str(e)})
     finally:
         q.put(None)
         _embed_running.clear()
+        _unregister_cancel(job_id)
 
 
 def embed_stream(request, job_id: str):
@@ -224,11 +291,6 @@ def embed_stream(request, job_id: str):
 
 
 # ── 난이도 분류 ───────────────────────────────────────────────
-
-_classify_jobs: dict[str, Queue] = {}
-_classify_jobs_lock = threading.Lock()
-_classify_running = threading.Event()
-
 
 @_staff_required
 @require_POST
@@ -251,14 +313,15 @@ def run_classify(request):
 
     job_id = str(uuid.uuid4())
     q: Queue = Queue()
+    cancel_event = _register_cancel(job_id)
     with _classify_jobs_lock:
         _classify_jobs[job_id] = q
 
-    threading.Thread(target=_classify_worker, args=(job_id, q, targets), daemon=True).start()
+    threading.Thread(target=_classify_worker, args=(job_id, q, targets, cancel_event), daemon=True).start()
     return JsonResponse({"job_id": job_id})
 
 
-def _classify_worker(job_id: str, q: Queue, targets: list):
+def _classify_worker(job_id: str, q: Queue, targets: list, cancel_event: threading.Event):
     _classify_running.set()
     try:
         from books.services import classify_difficulty
@@ -268,6 +331,10 @@ def _classify_worker(job_id: str, q: Queue, targets: list):
 
         done = errors = 0
         for bl in targets:
+            if cancel_event.is_set():
+                q.put({"type": "cancelled", "done": done, "total": total})
+                break
+
             q.put({"type": "progress", "done": done, "total": total, "current": bl.title})
             try:
                 difficulty = classify_difficulty(bl.title, bl.description, [])
@@ -287,12 +354,14 @@ def _classify_worker(job_id: str, q: Queue, targets: list):
                 q.put({"type": "log", "status": "error",
                        "title": bl.title, "error": str(e)})
 
-        q.put({"type": "complete", "done": done, "errors": errors, "total": total})
+        if not cancel_event.is_set():
+            q.put({"type": "complete", "done": done, "errors": errors, "total": total})
     except Exception as e:
         q.put({"type": "fatal", "error": str(e)})
     finally:
         q.put(None)
         _classify_running.clear()
+        _unregister_cancel(job_id)
 
 
 def classify_stream(request, job_id: str):
@@ -318,14 +387,15 @@ def run_extract_year(request):
 
     job_id = str(uuid.uuid4())
     q: Queue = Queue()
+    cancel_event = _register_cancel(job_id)
     with _year_jobs_lock:
         _year_jobs[job_id] = q
 
-    threading.Thread(target=_year_worker, args=(job_id, q, targets), daemon=True).start()
+    threading.Thread(target=_year_worker, args=(job_id, q, targets, cancel_event), daemon=True).start()
     return JsonResponse({"job_id": job_id})
 
 
-def _year_worker(job_id: str, q: Queue, targets: list):
+def _year_worker(job_id: str, q: Queue, targets: list, cancel_event: threading.Event):
     _year_running.set()
     try:
         from books.services import extract_publication_year
@@ -335,6 +405,10 @@ def _year_worker(job_id: str, q: Queue, targets: list):
 
         done = errors = 0
         for bl in targets:
+            if cancel_event.is_set():
+                q.put({"type": "cancelled", "done": done, "total": total})
+                break
+
             q.put({"type": "progress", "done": done, "total": total,
                    "current": bl.full_title})
             try:
@@ -350,17 +424,105 @@ def _year_worker(job_id: str, q: Queue, targets: list):
                 q.put({"type": "log", "status": "error",
                        "title": bl.full_title, "error": str(e)})
 
-        q.put({"type": "complete", "done": done, "errors": errors, "total": total})
+        if not cancel_event.is_set():
+            q.put({"type": "complete", "done": done, "errors": errors, "total": total})
     except Exception as e:
         q.put({"type": "fatal", "error": str(e)})
     finally:
         q.put(None)
         _year_running.clear()
+        _unregister_cancel(job_id)
 
 
 def year_stream(request, job_id: str):
     """SSE 스트림 — 연도 추출 진행 상황."""
     return _make_sse_response(_year_jobs, _year_jobs_lock, job_id)
+
+
+# ── 카테고리 분류 ─────────────────────────────────────────────
+
+@_staff_required
+@require_POST
+def run_classify_category(request):
+    """description 있음 + 카테고리 없음 도서를 SSE 방식으로 일괄 분류."""
+    if _category_running.is_set():
+        if not _parse_force(request):
+            return JsonResponse({"error": "이미 카테고리 분류가 진행 중입니다."}, status=409)
+        _category_running.clear()
+
+    from django.db.models import Count
+    from books.models import BookList
+    targets = list(
+        BookList.objects
+        .exclude(description="")
+        .annotate(cat_count=Count("categories"))
+        .filter(cat_count=0)
+        .order_by("title")
+    )
+    if not targets:
+        return JsonResponse({"error": "분류할 도서가 없습니다."}, status=404)
+
+    job_id = str(uuid.uuid4())
+    q: Queue = Queue()
+    cancel_event = _register_cancel(job_id)
+    with _category_jobs_lock:
+        _category_jobs[job_id] = q
+
+    threading.Thread(target=_category_worker, args=(job_id, q, targets, cancel_event), daemon=True).start()
+    return JsonResponse({"job_id": job_id})
+
+
+def _category_worker(job_id: str, q: Queue, targets: list, cancel_event: threading.Event):
+    _category_running.set()
+    try:
+        from books.models import BookListCategory, Category
+        from books.services import classify_category
+
+        total = len(targets)
+        q.put({"type": "start", "total": total})
+
+        done = errors = 0
+        for bl in targets:
+            if cancel_event.is_set():
+                q.put({"type": "cancelled", "done": done, "total": total})
+                break
+
+            q.put({"type": "progress", "done": done, "total": total, "current": bl.title})
+            try:
+                category_names = classify_category(bl.title, bl.description)
+                if not category_names:
+                    errors += 1
+                    q.put({"type": "log", "status": "error",
+                           "title": bl.title, "error": "카테고리 반환 없음"})
+                    continue
+
+                assigned = []
+                for name in category_names:
+                    cat, _ = Category.objects.get_or_create(name=name)
+                    BookListCategory.objects.get_or_create(book_list=bl, category=cat)
+                    assigned.append(name)
+
+                done += 1
+                q.put({"type": "log", "status": "success",
+                       "title": bl.title, "categories": assigned})
+            except Exception as e:
+                errors += 1
+                q.put({"type": "log", "status": "error",
+                       "title": bl.title, "error": str(e)})
+
+        if not cancel_event.is_set():
+            q.put({"type": "complete", "done": done, "errors": errors, "total": total})
+    except Exception as e:
+        q.put({"type": "fatal", "error": str(e)})
+    finally:
+        q.put(None)
+        _category_running.clear()
+        _unregister_cancel(job_id)
+
+
+def category_stream(request, job_id: str):
+    """SSE 스트림 — 카테고리 분류 진행 상황."""
+    return _make_sse_response(_category_jobs, _category_jobs_lock, job_id)
 
 
 # ── 알라딘 도서 후보 선택 ─────────────────────────────────────

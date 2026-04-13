@@ -7,7 +7,7 @@
 <style>
   .pipeline-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
     gap: 16px;
     margin-bottom: 28px;
   }
@@ -110,9 +110,19 @@
     border-radius: 20px;
     display: none;
   }
-  .status-badge.running { display: inline-flex; background: #fef3c7; color: #d97706; }
-  .status-badge.done    { display: inline-flex; background: #dcfce7; color: #16a34a; }
-  .status-badge.failed  { display: inline-flex; background: #fee2e2; color: #dc2626; }
+  .status-badge.running   { display: inline-flex; background: #fef3c7; color: #d97706; }
+  .status-badge.done      { display: inline-flex; background: #dcfce7; color: #16a34a; }
+  .status-badge.failed    { display: inline-flex; background: #fee2e2; color: #dc2626; }
+  .status-badge.cancelled { display: inline-flex; background: #f1f5f9; color: #64748b; }
+
+  .btn-danger {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 16px; border-radius: var(--radius); font-size: 0.875rem;
+    font-weight: 600; cursor: pointer; border: none;
+    background: #fee2e2; color: #dc2626; transition: background .15s;
+  }
+  .btn-danger:hover { background: #fecaca; }
+  .btn-danger:disabled { opacity: .45; cursor: not-allowed; }
 
   @media (max-width: 768px) {
     .pipeline-grid { grid-template-columns: 1fr; }
@@ -148,6 +158,10 @@
     <p class="stat-label">연도 미등록 도서</p>
     <p class="stat-value" style="color:{% if missing_year %}#d97706{% else %}var(--primary){% endif %}">{{ missing_year }}</p>
   </div>
+  <div class="stat-card">
+    <p class="stat-label">카테고리 미분류 도서</p>
+    <p class="stat-value" style="color:{% if missing_category %}#d97706{% else %}var(--primary){% endif %}">{{ missing_category }}</p>
+  </div>
 </div>
 
 <!-- ── 파이프라인 실행 ── -->
@@ -165,6 +179,12 @@
         <polygon points="5 3 19 12 5 21 5 3"/>
       </svg>
       파이프라인 시작
+    </button>
+    <button class="btn-danger" id="btnPipelineStop" style="display:none;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+      </svg>
+      중지
     </button>
     <span class="status-badge" id="pipelineStatus"></span>
   </div>
@@ -201,6 +221,12 @@
       </svg>
       임베딩 시작 ({{ missing_embed }}권)
     </button>
+    <button class="btn-danger" id="btnEmbedStop" style="display:none;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+      </svg>
+      중지
+    </button>
     <span class="status-badge" id="embedStatus"></span>
   </div>
 
@@ -233,6 +259,12 @@
         <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
       </svg>
       난이도 분류 시작 ({{ unclassified }}권)
+    </button>
+    <button class="btn-danger" id="btnClassifyStop" style="display:none;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+      </svg>
+      중지
     </button>
     <span class="status-badge" id="classifyStatus"></span>
   </div>
@@ -271,6 +303,12 @@
       </svg>
       연도 추출 시작
     </button>
+    <button class="btn-danger" id="btnYearStop" style="display:none;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+      </svg>
+      중지
+    </button>
     <span class="status-badge" id="yearStatus"></span>
   </div>
 
@@ -286,6 +324,47 @@
   </div>
   <div class="log-wrap" id="yearLogWrap" style="display:none;">
     <div id="yearLog"></div>
+  </div>
+</div>
+
+<!-- ── 카테고리 분류 ── -->
+<div class="pipeline-card">
+  <h2>카테고리 분류</h2>
+  <p class="card-desc">
+    설명은 있지만 카테고리가 없는 <strong>{{ missing_category }}권</strong>을 대상으로
+    LLM이 도서 내용을 분석해 카테고리를 자동으로 분류합니다.
+    (프로그래밍 언어, 웹 개발, 인공지능·데이터 등 12개 카테고리)
+    {% if not missing_category %}현재 미분류 도서가 없습니다.{% endif %}
+  </p>
+
+  <div class="pipeline-controls">
+    <button class="btn-primary" id="btnCategory" {% if not missing_category %}disabled{% endif %}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 7h7v7H3zM14 7h7v7h-7zM3 17h7v4H3zM14 17h7v4h-7z"/>
+      </svg>
+      카테고리 분류 시작 ({{ missing_category }}권)
+    </button>
+    <button class="btn-danger" id="btnCategoryStop" style="display:none;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+      </svg>
+      중지
+    </button>
+    <span class="status-badge" id="categoryStatus"></span>
+  </div>
+
+  <div class="progress-wrap" id="categoryProgressWrap" style="display:none;">
+    <div class="progress-meta">
+      <span id="categoryProgressText">0 / 0</span>
+      <span id="categoryProgressPct">0%</span>
+    </div>
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" id="categoryProgressBar"></div>
+    </div>
+    <p class="progress-current" id="categoryCurrent"></p>
+  </div>
+  <div class="log-wrap" id="categoryLogWrap" style="display:none;">
+    <div id="categoryLog"></div>
   </div>
 </div>
 
@@ -315,6 +394,7 @@
   const CSRF_TOKEN             = "{{ csrf_token }}";
   const PIPELINE_RUN_URL       = "{% url 'pipeline:run' %}";
   const PIPELINE_STREAM        = "{% url 'pipeline:stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
+  const STOP_BASE              = "{% url 'pipeline:stop' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
   const EMBED_RUN_URL          = "{% url 'pipeline:embed_run' %}";
   const EMBED_STREAM           = "{% url 'pipeline:embed_stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
   const CLASSIFY_RUN_URL       = "{% url 'pipeline:classify_run' %}";
@@ -323,10 +403,12 @@
   const YEAR_STREAM            = "{% url 'pipeline:year_stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
   const CANDIDATES_SEARCH_URL  = "{% url 'pipeline:candidates_search' %}";
   const CANDIDATES_APPLY_URL   = "{% url 'pipeline:candidates_apply' %}";
+  const CATEGORY_RUN_URL       = "{% url 'pipeline:category_run' %}";
+  const CATEGORY_STREAM        = "{% url 'pipeline:category_stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
 
   // ── 공통 로그 렌더러 ─────────────────────────────────────────
   function appendLog(container, type, opts = {}) {
-    const { bookCode, title, errorMsg, subMsgs, difficulty, year,
+    const { bookCode, title, errorMsg, subMsgs, difficulty, year, categories,
             bookListId, candidates } = opts;
     const entry = document.createElement("div");
     entry.className = `log-entry ${type}`;
@@ -363,6 +445,13 @@
         d.className = "log-sub-msg";
         d.style.marginLeft = "8px";
         d.textContent = `→ ${year}`;
+        main.appendChild(d);
+      }
+      if (categories && categories.length) {
+        const d = document.createElement("span");
+        d.className = "log-sub-msg";
+        d.style.marginLeft = "8px";
+        d.textContent = `→ ${categories.join(", ")}`;
         main.appendChild(d);
       }
       body.appendChild(main);
@@ -500,18 +589,25 @@
 
   function setStatus(badge, state) {
     badge.className = "status-badge " + state;
-    badge.textContent = state === "running" ? "실행 중..." : state === "done" ? "완료" : "오류 발생";
+    const labels = { running: "실행 중...", done: "완료", failed: "오류 발생", cancelled: "중단됨" };
+    badge.textContent = labels[state] || "";
   }
 
   // ── SSE 스트림 핸들러 팩토리 ─────────────────────────────────
-  function createStreamHandler({ runUrl, streamBase, btn, statusBadge,
+  function createStreamHandler({ runUrl, streamBase, btn, stopBtn, statusBadge,
                                   progressWrap, progressBar, progressText, progressPct,
                                   currentEl, logWrap, logContainer,
                                   startLabel }) {
     let es = null;
+    let currentJobId = null;
+
+    function setRunning(running) {
+      btn.disabled = running;
+      if (stopBtn) stopBtn.style.display = running ? "inline-flex" : "none";
+    }
 
     async function doRun(force = false) {
-      btn.disabled = true;
+      setRunning(true);
       logContainer.innerHTML = "";
       progressWrap.style.display = "block";
       logWrap.style.display = "block";
@@ -527,8 +623,7 @@
         });
         const data = await res.json();
         if (res.status === 409) {
-          btn.disabled = false;
-          setStatus(statusBadge, "");
+          setRunning(false);
           statusBadge.className = "status-badge";
           if (confirm(`진행 중인 ${startLabel} 작업이 있습니다.\n다시 작업을 진행하겠습니까?`)) {
             doRun(true);
@@ -538,20 +633,35 @@
         if (!res.ok) {
           appendLog(logContainer, "error", { errorMsg: data.error || "알 수 없는 오류" });
           setStatus(statusBadge, "failed");
-          btn.disabled = false;
+          setRunning(false);
           return;
         }
         startStream(data.job_id);
       } catch (e) {
         appendLog(logContainer, "error", { errorMsg: "서버 연결 실패: " + e.message });
         setStatus(statusBadge, "failed");
-        btn.disabled = false;
+        setRunning(false);
       }
     }
 
     btn.addEventListener("click", () => { if (!btn.disabled) doRun(); });
 
+    if (stopBtn) {
+      stopBtn.addEventListener("click", async () => {
+        if (!currentJobId) return;
+        stopBtn.disabled = true;
+        try {
+          await fetch(STOP_BASE + currentJobId + "/", {
+            method: "POST",
+            headers: { "X-CSRFToken": CSRF_TOKEN },
+          });
+        } catch (_) {}
+        stopBtn.disabled = false;
+      });
+    }
+
     function startStream(jobId) {
+      currentJobId = jobId;
       if (es) es.close();
       let isDone = false;
       es = new EventSource(streamBase + jobId + "/");
@@ -571,7 +681,7 @@
             appendLog(logContainer, "success", {
               bookCode: ev.book_code, title: ev.title,
               subMsgs: ev.messages, difficulty: ev.difficulty,
-              year: ev.year,
+              year: ev.year, categories: ev.categories,
             });
           } else {
             appendLog(logContainer, "error", {
@@ -582,9 +692,20 @@
 
         } else if (ev.type === "candidates") {
           appendLog(logContainer, "info", {
-            bookCode: ev.book_code, title: ev.title,
+            title: ev.title,
             bookListId: ev.book_list_id, candidates: ev.candidates,
           });
+
+        } else if (ev.type === "cancelled") {
+          isDone = true;
+          currentEl.textContent = "";
+          appendLog(logContainer, "info", {
+            errorMsg: `중단됨 — ${ev.done}건 처리됨 (전체 ${ev.total}건 중)`
+          });
+          setStatus(statusBadge, "cancelled");
+          es.close();
+          setRunning(false);
+          currentJobId = null;
 
         } else if (ev.type === "complete") {
           isDone = true;
@@ -595,14 +716,16 @@
           });
           setStatus(statusBadge, ev.errors > 0 ? "failed" : "done");
           es.close();
-          btn.disabled = false;
+          setRunning(false);
+          currentJobId = null;
 
         } else if (ev.type === "fatal") {
           isDone = true;
           appendLog(logContainer, "error", { errorMsg: "치명적 오류: " + ev.error });
           setStatus(statusBadge, "failed");
           es.close();
-          btn.disabled = false;
+          setRunning(false);
+          currentJobId = null;
         }
       };
 
@@ -611,7 +734,8 @@
         appendLog(logContainer, "error", { errorMsg: "스트림 연결이 끊겼습니다." });
         setStatus(statusBadge, "failed");
         es.close();
-        btn.disabled = false;
+        setRunning(false);
+        currentJobId = null;
       };
     }
   }
@@ -621,6 +745,7 @@
     runUrl:       PIPELINE_RUN_URL,
     streamBase:   PIPELINE_STREAM,
     btn:          document.getElementById("btnPipeline"),
+    stopBtn:      document.getElementById("btnPipelineStop"),
     statusBadge:  document.getElementById("pipelineStatus"),
     progressWrap: document.getElementById("pipelineProgressWrap"),
     progressBar:  document.getElementById("pipelineProgressBar"),
@@ -637,6 +762,7 @@
     runUrl:       EMBED_RUN_URL,
     streamBase:   EMBED_STREAM,
     btn:          document.getElementById("btnEmbed"),
+    stopBtn:      document.getElementById("btnEmbedStop"),
     statusBadge:  document.getElementById("embedStatus"),
     progressWrap: document.getElementById("embedProgressWrap"),
     progressBar:  document.getElementById("embedProgressBar"),
@@ -653,6 +779,7 @@
     runUrl:       CLASSIFY_RUN_URL,
     streamBase:   CLASSIFY_STREAM,
     btn:          document.getElementById("btnClassify"),
+    stopBtn:      document.getElementById("btnClassifyStop"),
     statusBadge:  document.getElementById("classifyStatus"),
     progressWrap: document.getElementById("classifyProgressWrap"),
     progressBar:  document.getElementById("classifyProgressBar"),
@@ -669,6 +796,7 @@
     runUrl:       YEAR_RUN_URL,
     streamBase:   YEAR_STREAM,
     btn:          document.getElementById("btnYear"),
+    stopBtn:      document.getElementById("btnYearStop"),
     statusBadge:  document.getElementById("yearStatus"),
     progressWrap: document.getElementById("yearProgressWrap"),
     progressBar:  document.getElementById("yearProgressBar"),
@@ -678,6 +806,23 @@
     logWrap:      document.getElementById("yearLogWrap"),
     logContainer: document.getElementById("yearLog"),
     startLabel:   "연도 추출",
+  });
+
+  // ── 카테고리 분류 섹션 ───────────────────────────────────────
+  createStreamHandler({
+    runUrl:       CATEGORY_RUN_URL,
+    streamBase:   CATEGORY_STREAM,
+    btn:          document.getElementById("btnCategory"),
+    stopBtn:      document.getElementById("btnCategoryStop"),
+    statusBadge:  document.getElementById("categoryStatus"),
+    progressWrap: document.getElementById("categoryProgressWrap"),
+    progressBar:  document.getElementById("categoryProgressBar"),
+    progressText: document.getElementById("categoryProgressText"),
+    progressPct:  document.getElementById("categoryProgressPct"),
+    currentEl:    document.getElementById("categoryCurrent"),
+    logWrap:      document.getElementById("categoryLogWrap"),
+    logContainer: document.getElementById("categoryLog"),
+    startLabel:   "카테고리 분류",
   });
 </script>
 {% endblock %}
