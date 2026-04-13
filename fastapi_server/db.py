@@ -59,7 +59,8 @@ _VECTOR_SEARCH_SQL = """
         bl.title,
         bl.difficulty,
         bl.thumbnail_url,
-        1 - (be.embedding <=> %s::vector) AS score
+        1 - (be.embedding <=> %s::vector) AS score,
+        bl.publication_year
     FROM book_embeddings be
     JOIN book_list bl ON bl.id = be.book_list_id
     WHERE EXISTS (
@@ -76,24 +77,25 @@ _VECTOR_SEARCH_SQL = """
 def _rows_to_dicts(rows) -> list[dict]:
     return [
         {
-            "book_list_id": r[0],
-            "title": r[1],
-            "difficulty": r[2],
-            "thumbnail_url": r[3],
-            "score": float(r[4]),
+            "book_list_id":    r[0],
+            "title":           r[1],
+            "difficulty":      r[2],
+            "thumbnail_url":   r[3],
+            "score":           float(r[4]),
+            "publication_year": r[5],
         }
         for r in rows
     ]
 
 
-# 제목에서 연도를 추출하기 위한 패턴 (2020~2039 범위)
+# 제목/설명에서 연도를 추출하기 위한 패턴 (2020~2039 범위)
 _YEAR_RE = re.compile(r"20[2-3]\d")
 
 
 def _recency_sort_key(book: dict) -> float:
     """최신 도서 우선 정렬을 위한 정렬 키.
 
-    도서 제목에서 연도를 추출하여 현재 연도 기준 가중치를 더합니다.
+    우선순위: DB의 publication_year → 제목에서 연도 추출
     원본 score는 변경하지 않고 정렬 키로만 사용합니다.
 
     가중치 기준 (현재 연도 = 2026 기준 예시):
@@ -102,13 +104,20 @@ def _recency_sort_key(book: dict) -> float:
       2024~2023 → +0.01 (2~3년 전)
       2022 이하 / 연도 없음 → +0.00
     """
-    match = _YEAR_RE.search(book["title"])
-    if not match:
+    # 1차: DB에 저장된 publication_year 사용
+    year = book.get("publication_year")
+
+    # 2차: 제목에서 직접 추출 (fallback)
+    if not year:
+        match = _YEAR_RE.search(book["title"])
+        if match:
+            year = int(match.group())
+
+    if not year:
         return book["score"]
 
     current_year = datetime.now().year
-    title_year = int(match.group())
-    diff = title_year - current_year
+    diff = year - current_year
 
     if diff >= 0:
         boost = 0.05

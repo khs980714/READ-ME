@@ -57,6 +57,12 @@ class BookList(models.Model):
         ADVANCED = "고급", "고급"
 
     title = models.CharField(max_length=500, verbose_name="도서명")
+    edition = models.CharField(max_length=200, blank=True, verbose_name="판차",
+                               help_text="예: (개정2판), (심화편) — 제목에서 분리된 판차 정보")
+    publication_year = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name="출판 연도",
+        help_text="제목 또는 설명에서 추출된 4자리 연도"
+    )
     author = models.ForeignKey(
         Author,
         on_delete=models.PROTECT,
@@ -91,10 +97,23 @@ class BookList(models.Model):
         verbose_name = "도서 정보"
         verbose_name_plural = "도서 정보"
         ordering = ["title"]
-        unique_together = (("title", "author", "publisher"),)
+        unique_together = (("title", "edition", "author", "publisher"),)
+
+    @property
+    def full_title(self) -> str:
+        """판차 포함 완전 도서명 (표시용).
+
+        충돌로 인해 title에 이미 edition이 포함된 경우 중복 방지.
+        예: title='혼자 공부하는 자바(개정판)', edition='(개정판)' → '혼자 공부하는 자바(개정판)'
+        """
+        if self.edition:
+            edition_clean = self.edition.strip()
+            if not self.title.rstrip().endswith(edition_clean):
+                return f"{self.title} {self.edition}"
+        return self.title
 
     def __str__(self):
-        return f"{self.title} ({self.author.name})"
+        return f"{self.full_title} ({self.author.name})"
 
     def get_author_display(self):
         return self.author.name
@@ -145,7 +164,8 @@ class Book(models.Model):
     # ── 하위 호환 프록시 프로퍼티 (템플릿/기존 코드 호환) ──────────
     @property
     def title(self):
-        return self.book_list.title
+        """판차 포함 완전 도서명 반환 (템플릿 호환)."""
+        return self.book_list.full_title
 
     @property
     def publisher(self):

@@ -37,6 +37,7 @@ def book_list(request):
     if query:
         qs = qs.filter(
             Q(book_list__title__icontains=query)
+            | Q(book_list__edition__icontains=query)
             | Q(book_list__author__name__icontains=query)
         ).distinct()
     if difficulty == "미분류":
@@ -92,6 +93,7 @@ def book_manage(request):
     if q:
         qs = qs.filter(
             Q(book_list__title__icontains=q)
+            | Q(book_list__edition__icontains=q)
             | Q(book_list__author__name__icontains=q)
             | Q(book_code__icontains=q)
         ).distinct()
@@ -109,6 +111,7 @@ def book_add(request):
         form_data = request.POST
         book_code = request.POST.get("book_code", "").strip()
         title = request.POST.get("title", "").strip()
+        edition = request.POST.get("edition", "").strip()
         author_name = request.POST.get("author", "").strip()
         publisher_name = request.POST.get("publisher", "").strip()
         difficulty = request.POST.get("difficulty", "")
@@ -127,6 +130,7 @@ def book_add(request):
                 publisher, _ = Publisher.objects.get_or_create(name=publisher_name)
                 book_list, created = BookList.objects.get_or_create(
                     title=title,
+                    edition=edition,
                     author=author,
                     publisher=publisher,
                     defaults={
@@ -138,7 +142,8 @@ def book_add(request):
                     },
                 )
                 if not created:
-                    # 같은 (title, author, publisher)가 있으면 수집 정보만 갱신
+                    # 같은 (title, edition, author, publisher)가 있으면 수집 정보만 갱신
+                    book_list.edition = edition
                     book_list.difficulty = difficulty
                     book_list.isbn = isbn
                     book_list.thumbnail_url = thumbnail_url
@@ -184,6 +189,7 @@ def book_edit(request, pk):
     error = None
     form_data = {
         "title": book_list.title,
+        "edition": book_list.edition,
         "author": book_list.author.name,
         "publisher": book_list.publisher.name,
         "difficulty": book_list.difficulty,
@@ -196,6 +202,7 @@ def book_edit(request, pk):
     if request.method == "POST":
         form_data = request.POST
         title = request.POST.get("title", "").strip()
+        edition = request.POST.get("edition", "").strip()
         author_name = request.POST.get("author", "").strip()
         publisher_name = request.POST.get("publisher", "").strip()
         difficulty = request.POST.get("difficulty", "")
@@ -217,6 +224,7 @@ def book_edit(request, pk):
                 author, _ = Author.objects.get_or_create(name=author_name)
                 publisher, _ = Publisher.objects.get_or_create(name=publisher_name)
                 book_list.title = title
+                book_list.edition = edition
                 book_list.author = author
                 book_list.publisher = publisher
                 book_list.difficulty = difficulty

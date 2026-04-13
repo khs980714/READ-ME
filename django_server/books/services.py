@@ -19,30 +19,102 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
+# ── 판차 / 연도 패턴 ──────────────────────────────────────────
+
+_EDITION_RE = re.compile(
+    r"(?:"
+    r"\s*[\(\[（［][^\)\]）］]*?(?:판|편|개정|증보|완전개정|전면개정)\w*[\)\]）］]"  # (제2판), (심화편) 등
+    r"|\s+개정증보판"                          # 개정증보판 (괄호 없음)
+    r"|\s+(?:전면개정|완전개정|개정)\d*판"     # 개정판, 개정2판
+    r"|\s+제\d+판"                             # 제2판, 제3판
+    r"|\s+\d+판\b"                             # 2판, 3판
+    r"|\s+\d+권$"                              # 1권, 2권 (끝)
+    r"|\s+부록$"                               # 부록 (끝)
+    r"|\s+기출(?:문제집|공략)$"               # 기출문제집, 기출공략 (끝)
+    r"|\s+(?:이론|실기)편\s+\d+$"             # 이론편 1, 실기편 2 (끝)
+    r")",
+    re.IGNORECASE,
+)
+
+_YEAR_RE = re.compile(r"20[2-3]\d")
+
+
+def extract_edition_info(title: str) -> tuple[str, str]:
+    """(edition_str, base_title) 반환. 패턴 없으면 ('', title)."""
+    m = _EDITION_RE.search(title)
+    if not m:
+        return "", title
+    edition = m.group().strip()
+    base = (title[: m.start()] + title[m.end() :]).strip()
+    return edition, base
+
+
+def extract_publication_year(title: str, description: str = "") -> int | None:
+    """제목(1차) → 설명(2차) 순으로 연도 추출. 없으면 None."""
+    m = _YEAR_RE.search(title)
+    if m:
+        return int(m.group())
+    if description:
+        m = _YEAR_RE.search(description)
+        if m:
+            return int(m.group())
+    return None
+
+
+def _split_description_toc(text: str) -> tuple[str, str]:
+    """설명 텍스트에서 목차 섹션 분리.
+
+    '목차', '차례' 등 섹션 헤더를 기준으로 설명 / 목차로 분리합니다.
+    반환: (description, toc) — toc가 없으면 빈 문자열.
+    """
+    if not text:
+        return text, ""
+
+    _TOC_MARKERS = [
+        r"(?:^|\n)\s*(?:■\s*|◎\s*|▶\s*|【\s*)?목\s*차(?:\s*】)?\s*(?:\n|$)",
+        r"(?:^|\n)\s*차\s*례\s*(?:\n|$)",
+        r"(?:^|\n)\s*\[\s*목\s*차\s*\]\s*(?:\n|$)",
+        r"(?:^|\n)\s*<\s*목\s*차\s*>\s*(?:\n|$)",
+    ]
+
+    for pattern in _TOC_MARKERS:
+        m = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+        if m:
+            desc_part = text[: m.start()].strip()
+            toc_part = text[m.start() :].strip()
+            if desc_part and len(toc_part) > 20:
+                return desc_part[:2000], toc_part[:3000]
+
+    return text, ""
+
+
 # ── 알라딘 Open API ───────────────────────────────────────────
 
 ALADIN_SEARCH_URL = "http://www.aladin.co.kr/ttb/api/ItemSearch.aspx"
 ALADIN_LOOKUP_URL = "http://www.aladin.co.kr/ttb/api/ItemLookUp.aspx"
 
 
-def fetch_aladin_book_info(title: str) -> dict | None:
-    """
-    알라딘 Open API(TTB)로 도서 정보 조회.
-    thumbnail, description, isbn, toc 반환.
-    ALADIN_TTB_KEY 미설정 시 None 반환.
+def fetch_aladin_book_info(title: str, max_results: int = 5) -> tuple[dict | None, list[dict]]:
+    """알라딘 Open API(TTB)로 도서 정보 조회.
+
+    반환: (primary_info, candidates)
+      primary_info: 첫 번째 결과의 thumbnail/description/isbn/toc, 없으면 None
+      candidates:   최대 max_results개의 후보 목록 (도서 선택 팝오버용)
+
+    ALADIN_TTB_KEY 미설정 시 (None, []) 반환.
     """
     ttb_key = getattr(settings, "ALADIN_TTB_KEY", "")
     if not ttb_key:
-        return None
+        return None, []
     try:
-        # 1단계: 도서 검색
+        # 1단계: 도서 검색 (max_results개 반환)
         resp = requests.get(
             ALADIN_SEARCH_URL,
             params={
                 "ttbkey": ttb_key,
                 "Query": _normalize_title(title),
                 "QueryType": "Title",
-                "MaxResults": 1,
+                "MaxResults": max_results,
                 "SearchTarget": "Book",
                 "output": "js",
                 "Version": "20131101",
@@ -50,12 +122,24 @@ def fetch_aladin_book_info(title: str) -> dict | None:
             timeout=10,
         )
         resp.raise_for_status()
-        data = resp.json()
-        items = data.get("item", [])
+        items = resp.json().get("item", [])
         if not items:
-            return None
-        item = items[0]
+            return None, []
 
+        # 후보 목록 구성
+        candidates = [
+            {
+                "title":         it.get("title", ""),
+                "author":        it.get("author", ""),
+                "publisher":     it.get("publisher", ""),
+                "thumbnail_url": it.get("cover", ""),
+                "isbn":          it.get("isbn13", ""),
+                "item_id":       str(it.get("itemId", "")),
+            }
+            for it in items
+        ]
+
+        item = items[0]
         result: dict = {
             "thumbnail_url": item.get("cover", ""),
             "description":   item.get("description", "")[:2000],
@@ -79,8 +163,7 @@ def fetch_aladin_book_info(title: str) -> dict | None:
                     timeout=10,
                 )
                 lookup_resp.raise_for_status()
-                lookup_data = lookup_resp.json()
-                lookup_items = lookup_data.get("item", [])
+                lookup_items = lookup_resp.json().get("item", [])
                 if lookup_items:
                     sub_info = lookup_items[0].get("subInfo", {})
                     toc = sub_info.get("toc", "")
@@ -89,9 +172,46 @@ def fetch_aladin_book_info(title: str) -> dict | None:
             except Exception as exc:
                 logger.warning("알라딘 TOC 조회 실패 (%s): %s", title, exc)
 
-        return result if any(v for v in result.values()) else None
+        primary = result if any(v for v in result.values()) else None
+        return primary, candidates
     except Exception as exc:
         logger.warning("알라딘 API 실패 (%s): %s", title, exc)
+        return None, []
+
+
+def fetch_aladin_by_item_id(item_id: str) -> dict | None:
+    """알라딘 ItemId로 상세 도서 정보 조회 (도서 선택 후 적용용)."""
+    ttb_key = getattr(settings, "ALADIN_TTB_KEY", "")
+    if not ttb_key:
+        return None
+    try:
+        resp = requests.get(
+            ALADIN_LOOKUP_URL,
+            params={
+                "ttbkey": ttb_key,
+                "itemIdType": "ItemId",
+                "ItemId": item_id,
+                "output": "js",
+                "Version": "20131101",
+                "OptResult": "toc",
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        items = resp.json().get("item", [])
+        if not items:
+            return None
+        item = items[0]
+        sub_info = item.get("subInfo", {})
+        result = {
+            "thumbnail_url": item.get("cover", ""),
+            "description":   item.get("description", "")[:2000],
+            "isbn":          item.get("isbn13", ""),
+            "toc":           sub_info.get("toc", "")[:3000],
+        }
+        return result if any(v for v in result.values()) else None
+    except Exception as exc:
+        logger.warning("알라딘 아이템 조회 실패 (%s): %s", item_id, exc)
         return None
 
 
@@ -202,27 +322,40 @@ def fetch_kyobo_book_info(title: str) -> dict | None:
 
 # ── 멀티소스 통합 수집 ────────────────────────────────────────
 
-def fetch_book_info_with_fallback(title: str, author: str = "") -> dict:
-    """
-    도서 정보 수집 — 우선순위: 알라딘 API → YES24 → 교보문고
+def fetch_book_info_with_fallback(
+    title: str, author: str = "", return_candidates: bool = False
+) -> dict | tuple[dict, list[dict]]:
+    """도서 정보 수집 — 우선순위: 알라딘 API → YES24 → 교보문고.
+
     각 소스에서 비어있는 필드를 채워가며 수집합니다.
-    force=True 이면 기존 데이터를 무시하고 새로 수집합니다.
+    description에 목차 섹션이 포함된 경우 자동으로 분리합니다.
+
+    return_candidates=True이면 (collected, aladin_candidates) 튜플 반환.
     """
     collected: dict = {"thumbnail_url": "", "description": "", "isbn": "", "toc": ""}
 
-    # 1차: 알라딘 API
-    aladin_info = fetch_aladin_book_info(title)
+    # 1차: 알라딘 API (후보 목록 포함)
+    aladin_info, candidates = fetch_aladin_book_info(title)
     if aladin_info:
-        for key in ("thumbnail_url", "description", "isbn", "toc"):
+        for key in ("thumbnail_url", "isbn", "toc"):
             if aladin_info.get(key):
                 collected[key] = aladin_info[key]
+        if aladin_info.get("description"):
+            # description에서 목차 분리
+            desc, toc_from_desc = _split_description_toc(aladin_info["description"])
+            collected["description"] = desc
+            if toc_from_desc and not collected["toc"]:
+                collected["toc"] = toc_from_desc
 
     # 2차: YES24 (description 또는 toc 없을 때)
     if not collected["description"] or not collected["toc"]:
         yes24_info = fetch_yes24_book_info(title)
         if yes24_info:
             if yes24_info.get("description") and not collected["description"]:
-                collected["description"] = yes24_info["description"]
+                desc, toc_from_desc = _split_description_toc(yes24_info["description"])
+                collected["description"] = desc
+                if toc_from_desc and not collected["toc"]:
+                    collected["toc"] = toc_from_desc
             if yes24_info.get("toc") and not collected["toc"]:
                 collected["toc"] = yes24_info["toc"]
             if yes24_info.get("thumbnail_url") and not collected["thumbnail_url"]:
@@ -233,10 +366,15 @@ def fetch_book_info_with_fallback(title: str, author: str = "") -> dict:
         kyobo_info = fetch_kyobo_book_info(title)
         if kyobo_info:
             if kyobo_info.get("description") and not collected["description"]:
-                collected["description"] = kyobo_info["description"]
+                desc, toc_from_desc = _split_description_toc(kyobo_info["description"])
+                collected["description"] = desc
+                if toc_from_desc and not collected["toc"]:
+                    collected["toc"] = toc_from_desc
             if kyobo_info.get("toc") and not collected["toc"]:
                 collected["toc"] = kyobo_info["toc"]
 
+    if return_candidates:
+        return collected, candidates
     return collected
 
 
@@ -334,19 +472,24 @@ def generate_embedding(book_list_id: int, title: str, description: str) -> bool:
 
 # ── 통합 파이프라인 ───────────────────────────────────────────
 
-def run_book_pipeline(book, progress_callback=None) -> None:
-    """
-    도서 데이터 수집 파이프라인 (BookList 단위 중복 방지):
+def run_book_pipeline(
+    book, progress_callback=None, return_candidates: bool = False
+) -> list[dict] | None:
+    """도서 데이터 수집 파이프라인 (BookList 단위 중복 방지):
+
     1. 알라딘 API → YES24 → 교보문고 순으로 fallback 수집
        (description·isbn·thumbnail·toc 중 비어있는 필드만 채움)
     2. LLM 난이도 분류 (difficulty 없을 때만, description 기반)
     3. 임베딩 생성 (embedding 없을 때만)
+
+    return_candidates=True이면 알라딘 후보 목록을 반환합니다 (없으면 []).
     """
     from .models import BookEmbedding
 
     book_list = book.book_list
     author_name = book_list.get_author_display()
     update_fields = []
+    aladin_candidates: list[dict] = []
 
     def _log(msg):
         if progress_callback:
@@ -363,7 +506,9 @@ def run_book_pipeline(book, progress_callback=None) -> None:
     )
     if needs_collect:
         _log("도서 정보 수집 중 (알라딘 → YES24 → 교보문고)...")
-        info = fetch_book_info_with_fallback(book_list.title, author_name)
+        info, aladin_candidates = fetch_book_info_with_fallback(
+            book_list.title, author_name, return_candidates=True
+        )
         if info.get("thumbnail_url") and not book_list.thumbnail_url:
             book_list.thumbnail_url = info["thumbnail_url"]
             update_fields.append("thumbnail_url")
@@ -402,10 +547,14 @@ def run_book_pipeline(book, progress_callback=None) -> None:
     else:
         _log("임베딩 이미 존재 — 건너뜀")
 
+    if return_candidates:
+        return aladin_candidates
+    return None
+
 
 def collect_book_data(book_list, force: bool = False) -> dict:
-    """
-    개별 도서 데이터 수집 (force=True이면 기존 데이터 덮어쓰기).
+    """개별 도서 데이터 수집 (force=True이면 기존 데이터 덮어쓰기).
+
     반환: {"updated_fields": [...], "thumbnail": bool, "description": bool, "toc": bool, "difficulty": str}
     """
     update_fields = []

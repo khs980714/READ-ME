@@ -15,6 +15,7 @@ from django.db import transaction
 from django.db.models.signals import post_save
 
 from books.models import Author, Book, BookList, Publisher
+from books.services import extract_edition_info
 from books.signals import on_book_saved
 
 CSV_PATH = Path(__file__).resolve().parents[3] / "data.csv"
@@ -66,9 +67,13 @@ class Command(BaseCommand):
                         primary_name = author_names[0] if author_names else "미상"
                         author, _ = Author.objects.get_or_create(name=primary_name)
 
-                        # BookList 중복 방지: (title, author, publisher) 조합 확인
+                        # 제목에서 판차 분리
+                        edition, base_title = extract_edition_info(title)
+
+                        # BookList 중복 방지: (title, edition, author, publisher) 조합 확인
                         book_list, _ = BookList.objects.get_or_create(
-                            title=title,
+                            title=base_title,
+                            edition=edition,
                             author=author,
                             publisher=publisher,
                         )
@@ -76,7 +81,8 @@ class Command(BaseCommand):
                         Book.objects.create(book_code=book_code, book_list=book_list)
 
                         created_count += 1
-                        self.stdout.write(f"  생성: [{book_code}] {title}")
+                        display_title = book_list.full_title
+                        self.stdout.write(f"  생성: [{book_code}] {display_title}")
         finally:
             post_save.connect(on_book_saved, sender=Book)
 

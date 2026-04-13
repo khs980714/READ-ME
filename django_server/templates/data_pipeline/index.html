@@ -144,6 +144,10 @@
     <p class="stat-label">난이도 미분류 도서</p>
     <p class="stat-value" style="color:{% if unclassified %}#d97706{% else %}var(--primary){% endif %}">{{ unclassified }}</p>
   </div>
+  <div class="stat-card">
+    <p class="stat-label">연도 미등록 도서</p>
+    <p class="stat-value" style="color:{% if missing_year %}#d97706{% else %}var(--primary){% endif %}">{{ missing_year }}</p>
+  </div>
 </div>
 
 <!-- ── 파이프라인 실행 ── -->
@@ -247,21 +251,83 @@
     <div id="classifyLog"></div>
   </div>
 </div>
+<!-- ── 출판 연도 추출 ── -->
+<div class="pipeline-card">
+  <h2>출판 연도 추출</h2>
+  <p class="card-desc">
+    전체 도서의 제목과 설명에서 출판 연도를 자동 추출하여 저장합니다.
+    제목에 연도가 없으면 설명에서 2차 확인합니다.
+    연도를 추출하지 못한 도서는 <strong>미등록</strong>으로 표기됩니다.
+    현재 연도 미등록 도서: <strong>{{ missing_year }}권</strong>
+  </p>
+
+  <div class="pipeline-controls">
+    <button class="btn-primary" id="btnYear">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+        <line x1="16" y1="2" x2="16" y2="6"/>
+        <line x1="8" y1="2" x2="8" y2="6"/>
+        <line x1="3" y1="10" x2="21" y2="10"/>
+      </svg>
+      연도 추출 시작
+    </button>
+    <span class="status-badge" id="yearStatus"></span>
+  </div>
+
+  <div class="progress-wrap" id="yearProgressWrap" style="display:none;">
+    <div class="progress-meta">
+      <span id="yearProgressText">0 / 0</span>
+      <span id="yearProgressPct">0%</span>
+    </div>
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" id="yearProgressBar"></div>
+    </div>
+    <p class="progress-current" id="yearCurrent"></p>
+  </div>
+  <div class="log-wrap" id="yearLogWrap" style="display:none;">
+    <div id="yearLog"></div>
+  </div>
+</div>
+
+<!-- ── 도서 후보 선택 팝오버 ── -->
+<div id="candidateOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:1000; align-items:center; justify-content:center;">
+  <div style="background:var(--surface); border:1px solid var(--border); border-radius:12px; width:min(600px,94vw); max-height:80vh; display:flex; flex-direction:column; box-shadow:0 16px 40px rgba(0,0,0,.2);">
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:18px 22px; border-bottom:1px solid var(--border);">
+      <div>
+        <p style="font-weight:700; font-size:1rem; margin-bottom:2px;">도서 선택</p>
+        <p id="candidateBookTitle" style="font-size:0.82rem; color:var(--text-muted);"></p>
+      </div>
+      <button id="btnCandidateClose" style="background:none; border:none; cursor:pointer; padding:4px; color:var(--text-muted);">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div id="candidateList" style="overflow-y:auto; padding:10px 0; flex:1;"></div>
+    <div id="candidateStatus" style="padding:10px 22px; font-size:0.82rem; color:var(--text-muted); border-top:1px solid var(--border); display:none;"></div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
 <script>
-  const CSRF_TOKEN        = "{{ csrf_token }}";
-  const PIPELINE_RUN_URL  = "{% url 'pipeline:run' %}";
-  const PIPELINE_STREAM   = "{% url 'pipeline:stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000", "");
-  const EMBED_RUN_URL     = "{% url 'pipeline:embed_run' %}";
-  const EMBED_STREAM      = "{% url 'pipeline:embed_stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000", "");
-  const CLASSIFY_RUN_URL  = "{% url 'pipeline:classify_run' %}";
-  const CLASSIFY_STREAM   = "{% url 'pipeline:classify_stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000", "");
+  const CSRF_TOKEN             = "{{ csrf_token }}";
+  const PIPELINE_RUN_URL       = "{% url 'pipeline:run' %}";
+  const PIPELINE_STREAM        = "{% url 'pipeline:stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
+  const EMBED_RUN_URL          = "{% url 'pipeline:embed_run' %}";
+  const EMBED_STREAM           = "{% url 'pipeline:embed_stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
+  const CLASSIFY_RUN_URL       = "{% url 'pipeline:classify_run' %}";
+  const CLASSIFY_STREAM        = "{% url 'pipeline:classify_stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
+  const YEAR_RUN_URL           = "{% url 'pipeline:year_run' %}";
+  const YEAR_STREAM            = "{% url 'pipeline:year_stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
+  const CANDIDATES_SEARCH_URL  = "{% url 'pipeline:candidates_search' %}";
+  const CANDIDATES_APPLY_URL   = "{% url 'pipeline:candidates_apply' %}";
 
   // ── 공통 로그 렌더러 ─────────────────────────────────────────
   function appendLog(container, type, opts = {}) {
-    const { bookCode, title, errorMsg, subMsgs, difficulty } = opts;
+    const { bookCode, title, errorMsg, subMsgs, difficulty, year,
+            bookListId, candidates } = opts;
     const entry = document.createElement("div");
     entry.className = `log-entry ${type}`;
 
@@ -292,6 +358,13 @@
         d.textContent = `→ ${difficulty}`;
         main.appendChild(d);
       }
+      if (year) {
+        const d = document.createElement("span");
+        d.className = "log-sub-msg";
+        d.style.marginLeft = "8px";
+        d.textContent = `→ ${year}`;
+        main.appendChild(d);
+      }
       body.appendChild(main);
     } else if (errorMsg) {
       const m = document.createElement("div");
@@ -314,10 +387,107 @@
       body.appendChild(s);
     });
 
+    // 후보 도서 선택 버튼
+    if (candidates && candidates.length > 1 && bookListId) {
+      const btn = document.createElement("button");
+      btn.className = "btn-ghost";
+      btn.style.cssText = "margin-top:6px; font-size:0.78rem; padding:3px 10px;";
+      btn.textContent = `도서 선택 (${candidates.length}건)`;
+      btn.addEventListener("click", () => openCandidateModal(bookListId, title, candidates));
+      body.appendChild(btn);
+    }
+
     entry.appendChild(icon);
     entry.appendChild(body);
     container.appendChild(entry);
     container.scrollTop = container.scrollHeight;
+  }
+
+  // ── 후보 도서 팝오버 ─────────────────────────────────────────
+  const overlay   = document.getElementById("candidateOverlay");
+  const candList  = document.getElementById("candidateList");
+  const candTitle = document.getElementById("candidateBookTitle");
+  const candStatus = document.getElementById("candidateStatus");
+  document.getElementById("btnCandidateClose").addEventListener("click", () => {
+    overlay.style.display = "none";
+  });
+  overlay.addEventListener("click", e => {
+    if (e.target === overlay) overlay.style.display = "none";
+  });
+
+  function openCandidateModal(bookListId, title, candidates) {
+    candTitle.textContent = title || "";
+    candStatus.style.display = "none";
+    candStatus.textContent = "";
+    candList.innerHTML = "";
+
+    candidates.forEach(c => {
+      const item = document.createElement("div");
+      item.style.cssText = "display:flex; gap:14px; align-items:center; padding:12px 22px; border-bottom:1px solid var(--border); cursor:pointer; transition:background .15s;";
+      item.addEventListener("mouseenter", () => item.style.background = "var(--bg)");
+      item.addEventListener("mouseleave", () => item.style.background = "");
+
+      const thumb = document.createElement("div");
+      thumb.style.cssText = "width:46px; height:60px; flex-shrink:0; border-radius:4px; overflow:hidden; background:var(--border);";
+      if (c.thumbnail_url) {
+        thumb.innerHTML = `<img src="${escHtml(c.thumbnail_url)}" style="width:100%;height:100%;object-fit:cover;" loading="lazy">`;
+      }
+
+      const info = document.createElement("div");
+      info.style.flex = "1";
+      info.innerHTML = `
+        <div style="font-weight:600; font-size:0.9rem; margin-bottom:3px;">${escHtml(c.title)}</div>
+        <div style="font-size:0.8rem; color:var(--text-muted);">${escHtml(c.author)} · ${escHtml(c.publisher)}</div>
+        ${c.isbn ? `<div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">ISBN: ${escHtml(c.isbn)}</div>` : ""}
+      `;
+
+      const selectBtn = document.createElement("button");
+      selectBtn.className = "btn-primary";
+      selectBtn.style.cssText = "font-size:0.8rem; padding:5px 12px; flex-shrink:0;";
+      selectBtn.textContent = "선택";
+      selectBtn.addEventListener("click", async () => {
+        selectBtn.disabled = true;
+        selectBtn.textContent = "적용 중...";
+        candStatus.style.display = "block";
+        candStatus.textContent = "도서 정보를 가져오는 중...";
+        try {
+          const res = await fetch(CANDIDATES_APPLY_URL, {
+            method: "POST",
+            headers: { "X-CSRFToken": CSRF_TOKEN, "Content-Type": "application/json" },
+            body: JSON.stringify({ book_list_id: bookListId, item_id: c.item_id }),
+          });
+          const data = await res.json();
+          if (data.ok) {
+            candStatus.style.color = "#16a34a";
+            candStatus.textContent = `✓ 적용 완료 — 갱신된 항목: ${(data.updated_fields || []).join(", ") || "없음"}`;
+            selectBtn.textContent = "완료";
+          } else {
+            candStatus.style.color = "#dc2626";
+            candStatus.textContent = `✗ 오류: ${data.error || "알 수 없는 오류"}`;
+            selectBtn.disabled = false;
+            selectBtn.textContent = "선택";
+          }
+        } catch (e) {
+          candStatus.style.color = "#dc2626";
+          candStatus.textContent = "서버 연결 실패";
+          selectBtn.disabled = false;
+          selectBtn.textContent = "선택";
+        }
+      });
+
+      item.appendChild(thumb);
+      item.appendChild(info);
+      item.appendChild(selectBtn);
+      candList.appendChild(item);
+    });
+
+    overlay.style.display = "flex";
+  }
+
+  function escHtml(str) {
+    return String(str || "")
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
   // ── 공통 진행바 업데이트 ─────────────────────────────────────
@@ -340,8 +510,7 @@
                                   startLabel }) {
     let es = null;
 
-    btn.addEventListener("click", async () => {
-      if (btn.disabled) return;
+    async function doRun(force = false) {
       btn.disabled = true;
       logContainer.innerHTML = "";
       progressWrap.style.display = "block";
@@ -354,8 +523,18 @@
         const res = await fetch(runUrl, {
           method: "POST",
           headers: { "X-CSRFToken": CSRF_TOKEN, "Content-Type": "application/json" },
+          body: JSON.stringify(force ? { force: true } : {}),
         });
         const data = await res.json();
+        if (res.status === 409) {
+          btn.disabled = false;
+          setStatus(statusBadge, "");
+          statusBadge.className = "status-badge";
+          if (confirm(`진행 중인 ${startLabel} 작업이 있습니다.\n다시 작업을 진행하겠습니까?`)) {
+            doRun(true);
+          }
+          return;
+        }
         if (!res.ok) {
           appendLog(logContainer, "error", { errorMsg: data.error || "알 수 없는 오류" });
           setStatus(statusBadge, "failed");
@@ -368,7 +547,9 @@
         setStatus(statusBadge, "failed");
         btn.disabled = false;
       }
-    });
+    }
+
+    btn.addEventListener("click", () => { if (!btn.disabled) doRun(); });
 
     function startStream(jobId) {
       if (es) es.close();
@@ -389,7 +570,8 @@
           if (ev.status === "success") {
             appendLog(logContainer, "success", {
               bookCode: ev.book_code, title: ev.title,
-              subMsgs: ev.messages, difficulty: ev.difficulty
+              subMsgs: ev.messages, difficulty: ev.difficulty,
+              year: ev.year,
             });
           } else {
             appendLog(logContainer, "error", {
@@ -397,6 +579,12 @@
               errorMsg: ev.error, subMsgs: ev.messages
             });
           }
+
+        } else if (ev.type === "candidates") {
+          appendLog(logContainer, "info", {
+            bookCode: ev.book_code, title: ev.title,
+            bookListId: ev.book_list_id, candidates: ev.candidates,
+          });
 
         } else if (ev.type === "complete") {
           isDone = true;
@@ -474,6 +662,22 @@
     logWrap:      document.getElementById("classifyLogWrap"),
     logContainer: document.getElementById("classifyLog"),
     startLabel:   "난이도 분류",
+  });
+
+  // ── 연도 추출 섹션 ───────────────────────────────────────────
+  createStreamHandler({
+    runUrl:       YEAR_RUN_URL,
+    streamBase:   YEAR_STREAM,
+    btn:          document.getElementById("btnYear"),
+    statusBadge:  document.getElementById("yearStatus"),
+    progressWrap: document.getElementById("yearProgressWrap"),
+    progressBar:  document.getElementById("yearProgressBar"),
+    progressText: document.getElementById("yearProgressText"),
+    progressPct:  document.getElementById("yearProgressPct"),
+    currentEl:    document.getElementById("yearCurrent"),
+    logWrap:      document.getElementById("yearLogWrap"),
+    logContainer: document.getElementById("yearLog"),
+    startLabel:   "연도 추출",
   });
 </script>
 {% endblock %}

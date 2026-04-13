@@ -371,13 +371,20 @@
         </div>
         {% endif %}
 
-        <div class="form-group {% if mode == 'edit' %}form-col-full{% endif %}">
+        <div class="form-group">
           <label class="form-label" for="title">
             도서명<span class="required">*</span>
           </label>
           <input class="form-input" type="text" id="title" name="title"
                  placeholder="도서 제목을 입력하세요"
                  value="{{ form_data.title|default:'' }}" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="edition">판차</label>
+          <input class="form-input" type="text" id="edition" name="edition"
+                 placeholder="예: (개정2판), (심화편)"
+                 value="{{ form_data.edition|default:'' }}">
         </div>
 
         <div class="form-group">

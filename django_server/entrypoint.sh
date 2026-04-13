@@ -51,9 +51,10 @@ fi
 echo "=== Starting Gunicorn ==="
 exec gunicorn config.wsgi:application \
   --bind 0.0.0.0:8000 \
-  --workers 2 \
-  --threads 4 \
+  --workers 1 \
+  --threads 8 \
   --worker-class gthread \
-  --timeout 120 \
+  --timeout 600 \
+  --keep-alive 65 \
   --access-logfile - \
   --error-logfile -
