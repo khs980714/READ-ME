@@ -9,10 +9,27 @@
   - DIFFICULTY_ORDER: fallback 방향 및 키워드 우선순위 판단에 공유 사용
 """
 
+import re
+
 from langchain_core.messages import AIMessage, HumanMessage
 
 # 최근 유지할 메시지 수 (user + assistant 합산)
 HISTORY_WINDOW: int = 6
+
+_ASCII_ALPHA_RE = re.compile(r'[a-zA-Z]+')
+
+
+def normalize_question(text: str) -> str:
+    """영문자를 모두 대문자로 변환합니다.
+
+    임베딩·LLM 입력 전에 적용하여 'aws'/'AWS'/'Aws' 간 유사도 편차를 제거합니다.
+    한글·숫자·특수문자는 그대로 유지됩니다.
+
+    예) "aws 도서 조회해줘"  → "AWS 도서 조회해줘"
+        "파이썬 django 책"  → "파이썬 DJANGO 책"
+    """
+    return _ASCII_ALPHA_RE.sub(lambda m: m.group().upper(), text)
+
 
 # 난이도 순서 (낮은 → 높은)
 DIFFICULTY_ORDER: list[str] = ["입문", "초급", "중급", "고급"]

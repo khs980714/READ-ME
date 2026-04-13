@@ -201,3 +201,39 @@ async def vector_search_by_difficulty(
 async def upsert_embedding(book_list_id: int, embedding: list[float]) -> None:
     """book_embeddings upsert (async)."""
     await asyncio.to_thread(_upsert_embedding_sync, book_list_id, embedding)
+
+
+# ── 키워드(제목) 검색 ──────────────────────────────────────────
+
+_KEYWORD_SEARCH_SQL = """
+    SELECT
+        bl.id,
+        bl.title,
+        bl.difficulty,
+        bl.thumbnail_url,
+        1.0 AS score,
+        bl.publication_year,
+        (SELECT b.book_code FROM books b WHERE b.book_list_id = bl.id AND b.is_active = true ORDER BY b.book_code LIMIT 1) AS book_code
+    FROM book_list bl
+    WHERE EXISTS (
+        SELECT 1 FROM books b
+        WHERE b.book_list_id = bl.id AND b.is_active = true
+    )
+      AND (bl.title ILIKE %s OR bl.description ILIKE %s)
+    ORDER BY bl.title
+"""
+
+
+def _keyword_search_sync(keyword: str) -> list[dict]:
+    """제목·설명 ILIKE 검색 (동기). limit 없이 전체 결과 반환."""
+    pattern = f"%{keyword}%"
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(_KEYWORD_SEARCH_SQL, (pattern, pattern))
+            rows = cur.fetchall()
+    return _rows_to_dicts(rows)
+
+
+async def keyword_search(keyword: str) -> list[dict]:
+    """제목·설명 ILIKE 검색 (async). limit 없이 전체 결과 반환."""
+    return await asyncio.to_thread(_keyword_search_sync, keyword)

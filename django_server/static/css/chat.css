@@ -412,6 +412,40 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+
+.modal-footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.modal-footer:empty { display: none; }
+
+.btn-page {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--primary);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.btn-page:hover:not(:disabled) { background: #e0d8f5; }
+.btn-page:disabled { opacity: .4; cursor: not-allowed; }
+
+.modal-page-info {
+  font-size: 0.82rem;
+  color: var(--text-sub);
+  min-width: 140px;
+  text-align: center;
 }
 
 /* ── Streaming Waiting State ─────────────────────────────── */

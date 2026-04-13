@@ -3,7 +3,11 @@
  * AJAX / SSE 스트리밍 챗봇 메시지 송수신 및 추천 카드 렌더링
  */
 
-const VISIBLE_CARDS = 3;
+const VISIBLE_CARDS  = 3;
+const MODAL_PAGE_SIZE = 10;
+
+let _modalAllRecs = [];
+let _modalPage    = 0;
 
 const chatMessages  = document.getElementById("chatMessages");
 const chatInput     = document.getElementById("chatInput");
@@ -303,16 +307,15 @@ function renderRecommendations(recs) {
   cardsWrap.className = "rec-cards";
 
   const visible = recs.slice(0, VISIBLE_CARDS);
-  const hidden  = recs.slice(VISIBLE_CARDS);
 
   visible.forEach((rec) => cardsWrap.appendChild(makeCard(rec)));
   section.appendChild(cardsWrap);
 
-  if (hidden.length) {
+  if (recs.length > VISIBLE_CARDS) {
     const moreBtn = document.createElement("button");
     moreBtn.className = "btn-more";
-    moreBtn.textContent = `더보기 +${hidden.length}`;
-    moreBtn.addEventListener("click", () => openModal(hidden));
+    moreBtn.textContent = `더보기 (총 ${recs.length}권)`;
+    moreBtn.addEventListener("click", () => openModal(recs));
     section.appendChild(moreBtn);
   }
 
@@ -371,15 +374,54 @@ function makeCard(rec) {
 }
 
 // ── 모달 ────────────────────────────────────────────────
+const modalTitle = document.getElementById("modalTitle");
+const modalPagination = document.getElementById("modalPagination");
+
 function openModal(recs) {
+  _modalAllRecs = recs;
+  _modalPage    = 0;
+  modalTitle.textContent = `도서 목록 (총 ${recs.length}권)`;
+  renderModalPage();
+  moreModal.hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+function renderModalPage() {
+  const total      = _modalAllRecs.length;
+  const totalPages = Math.ceil(total / MODAL_PAGE_SIZE);
+  const start      = _modalPage * MODAL_PAGE_SIZE;
+  const pageRecs   = _modalAllRecs.slice(start, start + MODAL_PAGE_SIZE);
+
   modalBookList.innerHTML = "";
-  recs.forEach((rec) => {
+  pageRecs.forEach((rec) => {
     const card = makeCard(rec);
     card.style.width = "100%";
     modalBookList.appendChild(card);
   });
-  moreModal.hidden = false;
-  document.body.style.overflow = "hidden";
+  modalBookList.scrollTop = 0;
+
+  modalPagination.innerHTML = "";
+  if (totalPages <= 1) return;
+
+  const prev = document.createElement("button");
+  prev.className = "btn-page";
+  prev.textContent = "이전";
+  prev.disabled = _modalPage === 0;
+  prev.addEventListener("click", () => { _modalPage--; renderModalPage(); });
+
+  const info = document.createElement("span");
+  info.className = "modal-page-info";
+  info.textContent = `${_modalPage + 1} / ${totalPages} 페이지`;
+
+  const next = document.createElement("button");
+  next.className = "btn-page";
+  next.textContent = "다음";
+  next.disabled = _modalPage >= totalPages - 1;
+  next.addEventListener("click", () => { _modalPage++; renderModalPage(); });
+
+  modalPagination.appendChild(prev);
+  modalPagination.appendChild(info);
+  modalPagination.appendChild(next);
 }
 
 modalClose.addEventListener("click", closeModal);
@@ -402,6 +444,7 @@ if (btnResetChat) {
 // ── 유틸 ────────────────────────────────────────────────
 function qtypeLabel(type) {
   return {
+    keyword_search:      "🔎 도서 목록 조회",
     specific_search:     "🔍 기술·키워드 탐색",
     goal_oriented:       "🗺️ 진로·목적 큐레이션",
     career_certification:"🏆 자격증·포트폴리오",

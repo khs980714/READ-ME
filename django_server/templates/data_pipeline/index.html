@@ -168,8 +168,8 @@
 <div class="pipeline-card">
   <h2>파이프라인 실행</h2>
   <p class="card-desc">
-    Naver Book Search API로 도서 정보(설명·썸네일·ISBN)를 수집하고,
-    리뷰 스크래핑 후 LLM으로 난이도를 분류합니다.
+    알라딘 API로 도서 정보(설명·썸네일·ISBN·목차)를 수집하고,
+    LLM으로 난이도를 분류합니다.
     설명이 없는 <strong>{{ pending }}권</strong>이 대상입니다.
   </p>
 
@@ -204,22 +204,22 @@
   </div>
 </div>
 
-<!-- ── 별도 임베딩 진행 ── -->
+<!-- ── 임베딩 진행 ── -->
 <div class="pipeline-card">
-  <h2>별도 임베딩 진행</h2>
+  <h2>임베딩 진행</h2>
   <p class="card-desc">
-    도서 설명이 직접 입력됐거나 파이프라인 중 임베딩이 누락된
-    <strong>{{ missing_embed }}권</strong>에 대해 임베딩을 생성합니다.
-    {% if not missing_embed %}현재 누락된 도서가 없습니다.{% endif %}
+    설명이 있는 모든 도서의 임베딩을 생성·갱신합니다.
+    이미 임베딩된 도서도 최신 내용으로 다시 저장됩니다.
+    현재 임베딩 누락 도서: <strong>{{ missing_embed }}권</strong>
   </p>
 
   <div class="pipeline-controls">
-    <button class="btn-primary" id="btnEmbed" {% if not missing_embed %}disabled{% endif %}>
+    <button class="btn-primary" id="btnEmbed">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="12" cy="12" r="10"/>
         <path d="M12 8v4l3 3"/>
       </svg>
-      임베딩 시작 ({{ missing_embed }}권)
+      임베딩 시작
     </button>
     <button class="btn-danger" id="btnEmbedStop" style="display:none;">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

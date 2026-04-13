@@ -224,22 +224,20 @@ def pipeline_stream(request, job_id: str):
 @_staff_required
 @require_POST
 def run_embed_missing(request):
-    """description 있음 + embedding 없음 도서를 SSE 방식으로 일괄 처리."""
+    """description 있는 모든 도서의 임베딩을 생성·갱신합니다 (SSE 방식)."""
     if _embed_running.is_set():
         if not _parse_force(request):
             return JsonResponse({"error": "이미 임베딩이 진행 중입니다."}, status=409)
         _embed_running.clear()
 
-    from books.models import BookEmbedding, BookList
-    embedded_ids = list(BookEmbedding.objects.values_list("book_list_id", flat=True))
+    from books.models import BookList
     targets = list(
         BookList.objects
         .exclude(description="")
-        .exclude(pk__in=embedded_ids)
         .order_by("title")
     )
     if not targets:
-        return JsonResponse({"error": "임베딩 누락 도서가 없습니다."}, status=404)
+        return JsonResponse({"error": "임베딩할 도서가 없습니다."}, status=404)
 
     job_id = str(uuid.uuid4())
     q: Queue = Queue()

@@ -5,10 +5,52 @@
 라우터에서 직접 DB를 다루지 않도록 검색 책임을 체인 레이어에 위임합니다.
 """
 
+import re
+
 from chains.utils import DIFFICULTY_ORDER
 from config import settings
-from db import vector_search, vector_search_by_difficulty
+from db import keyword_search, vector_search, vector_search_by_difficulty
 from llm import get_embeddings
+
+# 조회 의도 질문에서 기술·주제 키워드를 추출하기 위한 패턴 목록
+# 우선순위 순으로 적용 (앞 패턴이 먼저 매칭)
+_KEYWORD_EXTRACT_PATTERNS = [
+    # "AWS 도서 조회해줘" / "파이썬 책 있어?" 형태
+    re.compile(r'^(.+?)\s+(?:도서|책)\s*(?:조회|목록|있어|있나|보여|알려)', re.IGNORECASE),
+    # "AWS 관련 도서" / "파이썬 관련 책"
+    re.compile(r'^(.+?)\s+관련\s+(?:도서|책)', re.IGNORECASE),
+    # "AWS에 대한 도서" / "파이썬에 관한 책"
+    re.compile(r'^(.+?)\s*(?:에\s*대한|에\s*관한|에\s*관련된)\s+(?:도서|책)', re.IGNORECASE),
+    # "도서 목록 조회해줘" 같은 순수 조회 (기술명 없음)
+    re.compile(r'^(.+?)\s+(?:조회|목록)', re.IGNORECASE),
+]
+
+# 키워드 추출 후 제거할 후처리 패턴
+_KEYWORD_CLEANUP = re.compile(
+    r'\s*(?:도서|책|조회해줘?|조회해줄래\??|조회|있어\??|있나요\??|있나\??|'
+    r'있습니까\??|있는지|보여줘?|알려줘?|알려주세요|목록|관련|관한|어떤|뭐가|뭐)\s*',
+    re.IGNORECASE,
+)
+
+
+def extract_search_keyword(question: str) -> str:
+    """조회 질문에서 검색 키워드를 추출합니다.
+
+    예) "AWS 도서 조회해줘" → "AWS"
+        "파이썬 관련 책 있어?" → "파이썬"
+        "aws 책 보여줘" → "aws"
+    """
+    for pattern in _KEYWORD_EXTRACT_PATTERNS:
+        m = pattern.match(question.strip())
+        if m:
+            keyword = m.group(1).strip()
+            keyword = _KEYWORD_CLEANUP.sub(' ', keyword).strip()
+            if keyword:
+                return keyword
+
+    # 패턴 미매칭 시: 불필요한 단어 제거 후 반환
+    cleaned = _KEYWORD_CLEANUP.sub(' ', question).strip()
+    return cleaned if cleaned else question.strip()
 
 _THRESHOLD_MAP: dict[str, float] = {
     "specific_search": settings.RECOMMENDATION_THRESHOLD_SPECIFIC_SEARCH,
@@ -16,6 +58,18 @@ _THRESHOLD_MAP: dict[str, float] = {
     "career_certification": settings.RECOMMENDATION_THRESHOLD_CAREER_CERTIFICATION,
     "level_based": settings.RECOMMENDATION_THRESHOLD_LEVEL_BASED,
 }
+
+
+async def retrieve_books_by_keyword(question: str) -> tuple[list, str]:
+    """제목·설명 ILIKE 검색. 키워드를 추출하여 DB에서 직접 조회합니다.
+    limit 없이 전체 결과를 반환합니다.
+
+    Returns:
+        (books, keyword) — 검색에 사용된 키워드도 함께 반환
+    """
+    keyword = extract_search_keyword(question)
+    books = await keyword_search(keyword=keyword)
+    return books, keyword
 
 
 async def retrieve_books(message: str, question_type: str) -> list:

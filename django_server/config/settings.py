@@ -121,7 +121,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", SECRET_KEY)
 # Access token: 요청마다 검증, 짧게 유지
 JWT_ACCESS_TOKEN_LIFETIME = timedelta(
-    minutes=int(os.getenv("JWT_ACCESS_TOKEN_LIFETIME_MINUTES", "15"))
+    minutes=int(os.getenv("JWT_ACCESS_TOKEN_LIFETIME_MINUTES", "60"))
 )
 # Refresh token: Access token 만료 시 재발급용, 길게 유지
 JWT_REFRESH_TOKEN_LIFETIME = timedelta(

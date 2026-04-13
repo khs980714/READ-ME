@@ -11,9 +11,11 @@ logger = logging.getLogger(__name__)
 from chains.career_certification import career_certification_chain, career_certification_chain_stream
 from chains.classifier import classify_question
 from chains.goal_oriented import goal_oriented_chain, goal_oriented_chain_stream
+from chains.keyword_search import keyword_search_chain, keyword_search_chain_stream
 from chains.level_based import extract_difficulty_from_question, level_based_chain, level_based_chain_stream
-from chains.retriever import retrieve_books, retrieve_books_level_based
+from chains.retriever import retrieve_books, retrieve_books_by_keyword, retrieve_books_level_based
 from chains.specific_search import specific_search_chain, specific_search_chain_stream
+from chains.utils import normalize_question
 
 router = APIRouter()
 
@@ -57,6 +59,7 @@ def _build_chain_input(
     detected_level: str | None = None,
     actual_level: str | None = None,
     fallback_note: str | None = None,
+    keyword: str | None = None,
 ) -> dict:
     return {
         "question": req.message,
@@ -65,39 +68,48 @@ def _build_chain_input(
         "detected_level": detected_level,
         "actual_level": actual_level,
         "fallback_note": fallback_note,
+        "keyword": keyword or "",
     }
 
 
 async def _classify_and_retrieve(req: ChatRequest) -> tuple[str, list, dict]:
-    """분류 → 벡터 검색 → chain_input 빌드.
+    """분류 → 검색 → chain_input 빌드.
 
     Returns:
         (question_type, retrieved_books, chain_input)
         - out_of_scope인 경우 retrieved_books=[], chain_input={}
     """
-    question_type = await classify_question(req.message)
+    question = normalize_question(req.message)
+
+    question_type = await classify_question(question)
 
     if question_type == "out_of_scope":
         return question_type, [], {}
 
-    if question_type == "level_based":
-        detected_level = extract_difficulty_from_question(req.message)
+    if question_type == "keyword_search":
+        retrieved, keyword = await retrieve_books_by_keyword(question)
+        chain_input = _build_chain_input(req, retrieved, keyword=keyword)
+    elif question_type == "level_based":
+        detected_level = extract_difficulty_from_question(question)
         retrieved, actual_level, fallback_note = await retrieve_books_level_based(
-            req.message, detected_level
+            question, detected_level
         )
+        chain_input = _build_chain_input(req, retrieved, detected_level, actual_level, fallback_note)
     else:
-        detected_level = None
-        actual_level = None
-        fallback_note = None
-        retrieved = await retrieve_books(req.message, question_type=question_type)
+        retrieved = await retrieve_books(question, question_type=question_type)
+        chain_input = _build_chain_input(req, retrieved)
 
-    chain_input = _build_chain_input(req, retrieved, detected_level, actual_level, fallback_note)
+    # chain_input의 question도 정규화된 텍스트로 교체
+    chain_input["question"] = question
+
     return question_type, retrieved, chain_input
 
 
 async def _run_chain(question_type: str, chain_input: dict) -> str:
     """질문 유형에 맞는 체인을 실행해 응답 문자열을 반환합니다."""
-    if question_type == "specific_search":
+    if question_type == "keyword_search":
+        return keyword_search_chain(chain_input)
+    elif question_type == "specific_search":
         return await specific_search_chain(chain_input)
     elif question_type == "goal_oriented":
         return await goal_oriented_chain(chain_input)
@@ -109,7 +121,9 @@ async def _run_chain(question_type: str, chain_input: dict) -> str:
 
 def _get_stream_gen(question_type: str, chain_input: dict):
     """질문 유형에 맞는 스트리밍 async generator를 반환합니다."""
-    if question_type == "specific_search":
+    if question_type == "keyword_search":
+        return keyword_search_chain_stream(chain_input)
+    elif question_type == "specific_search":
         return specific_search_chain_stream(chain_input)
     elif question_type == "goal_oriented":
         return goal_oriented_chain_stream(chain_input)
@@ -139,8 +153,8 @@ async def chat_message(req: ChatRequest):
         if question_type == "out_of_scope":
             return ChatResponse(answer=_OUT_OF_SCOPE_MSG, question_type="out_of_scope")
 
-        # 3) 검색 결과 없음 처리 (LLM 호출 없이 즉시 반환)
-        if not retrieved:
+        # 3) 검색 결과 없음 처리 (keyword_search는 체인에서 직접 메시지 생성)
+        if not retrieved and question_type != "keyword_search":
             return ChatResponse(answer=_NO_RESULTS_MSG, question_type=question_type)
 
         # 4) 체인 실행
@@ -176,8 +190,8 @@ async def chat_message_stream(req: ChatRequest):
             yield f"data: {_json.dumps({'type': 'done', 'question_type': 'out_of_scope', 'recommendations': []})}\n\n"
             return
 
-        # 3) 검색 결과 없음 처리
-        if not retrieved:
+        # 3) 검색 결과 없음 처리 (keyword_search는 체인에서 직접 메시지 생성)
+        if not retrieved and question_type != "keyword_search":
             yield f"data: {_json.dumps({'type': 'answer_chunk', 'content': _NO_RESULTS_MSG}, ensure_ascii=False)}\n\n"
             yield f"data: {_json.dumps({'type': 'done', 'question_type': question_type, 'recommendations': []})}\n\n"
             return
