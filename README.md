@@ -118,7 +118,6 @@ READ-ME/
 | `description` | 도서 소개 (최대 2,000자) |
 | `toc` | 목차 (최대 3,000자) |
 | `difficulty` | 난이도 (`입문` / `초급` / `중급` / `고급`) |
-| `isbn` | ISBN-13 |
 | `thumbnail_url` | 표지 이미지 URL |
 
 ### 중복 수집 방지 로직
@@ -135,12 +134,16 @@ READ-ME/
 
 ## 챗봇 질문 유형
 
-| 유형 | 설명 | 응답 |
+LLM이 사용자의 질문을 6가지 유형으로 분류한 후, 유형별 전용 체인으로 응답합니다.
+
+| 유형 | 설명 | 예시 |
 |---|---|---|
-| `roadmap` | 학습 로드맵 요청 | 단계별 가이드 + 추천 도서 카드 |
-| `level_based` | 수준 명시 추천 요청 | 해당 수준 도서 카드 |
-| `general` | 기타 도서 관련 질문 | LLM 답변 (마크다운) + 연관 도서 카드 |
-| `unrelated` | 도서와 무관한 질문 | "도서와 관련없는 질문입니다." |
+| `keyword_search` | 특정 키워드 도서 목록 조회 | "AWS 도서 조회해줘", "파이썬 책 있어?" |
+| `specific_search` | 특정 기술·도구 추천 요청 | "스프링 부트 책 추천해줘", "리액트 공부할 책 알려줘" |
+| `goal_oriented` | 진로·직업 목표 기반 추천 | "프론트엔드 개발자가 되고 싶어", "데이터 엔지니어로 전직하고 싶어" |
+| `career_certification` | 자격증·코딩 테스트·취업 면접 준비 | "정보처리기사 실기 수험서", "코딩 테스트 준비 책 알려줘" |
+| `level_based` | 수준·숙련도 기반 추천 | "파이썬 중급자용 책", "생초보를 위한 자바 책" |
+| `out_of_scope` | IT·개발 도서와 무관한 질문 | "오늘 날씨 어때?", "요리책 추천해줘" |
 
 추천 카드는 유사도 threshold 이상인 도서를 최대 3개 기본 노출, 초과분은 **더보기**로 확인합니다.
 
@@ -230,7 +233,6 @@ cp .env.example .env
 | `DJANGO_SUPERUSER_PASSWORD` | 관리자 비밀번호 |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | DB 접속 정보 |
 | `DATABASE_URL` | `postgresql://<USER>:<PW>@db:5432/<DB>` |
-| `NAVER_CLIENT_ID` / `NAVER_CLIENT_SECRET` | Naver Developers 앱 자격증명 (도서 검색 팝오버용) |
 | `ALADIN_TTB_KEY` | 알라딘 Open API 키 (도서 정보·목차 수집 1차 소스) |
 | `NVIDIA_API_KEY` | NVIDIA NIM API 키 |
 | `NVIDIA_NIM_BASE_URL` / `NVIDIA_LLM_MODEL` / `NVIDIA_EMBEDDING_MODEL` | NVIDIA NIM 엔드포인트 |
@@ -297,6 +299,58 @@ docker compose down -v
 | 데이터 수집 페이지 접근 | X (메인으로 리다이렉트) | O |
 | Django Admin | X | O |
 | 도서 등록 / 수정 / 삭제 | X | O |
+
+---
+
+## 추천 정확도
+
+### 정렬 전략
+
+벡터 유사도 검색 후 `(정렬 키 1, 정렬 키 2)` 튜플로 재정렬합니다.
+
+| 쿼리 유형 | 1차 정렬 키 | 2차 정렬 키 | 비고 |
+|---|---|---|---|
+| 자격증 (`career_certification`) | `publication_year` DESC | `score` + 개정판 보너스 | 연도가 다르면 score와 무관하게 최신 연도 우선 |
+| 일반 쿼리 | 고정(0) | `score` + 연도 가중치 + 개정판 보너스 | 유사도 기반 정렬에 연도 가중치 합산 |
+
+**연도 가중치** (일반 쿼리)
+
+| 출판 연도 | 가중치 |
+|---|---|
+| 현재 연도 이상 | +0.05 |
+| 1년 전 | +0.03 |
+| 2~3년 전 | +0.01 |
+| 4년 이상 전 | +0.00 |
+
+**개정판 보너스**: `edition` 필드가 비어 있지 않으면 +0.02 (쿼리 유형 무관)
+
+### 자격증 도서 필터링
+
+`career_certification` 유형 질문에서 후처리 필터가 적용됩니다.
+
+| 필터 | 동작 | 예시 |
+|---|---|---|
+| 자격증 등급 | 다른 등급 자격증 도서 제외 | "정보처리기사" 질문 → "정보처리산업기사" 도서 제외 |
+| 시험 유형 | 반대 유형 전용 도서 제외 | "실기" 질문 → "필기" 전용 도서 제외 |
+| 올인원 예외 | 두 유형 모두 포함 시 유지 | "필기 + 실기 올인원" → 실기/필기 어느 질문에도 포함 |
+
+필터링 후 결과가 비면 원본 목록을 그대로 반환합니다 (안전 fallback).
+
+---
+
+## 테스트
+
+### 분류기 정확도 테스트
+
+질문 분류기의 정확도를 측정하는 테스트 스위트가 포함되어 있습니다.
+
+```bash
+docker exec read-me-fastapi_server-1 python tests/run_classifier_test.py
+```
+
+- 테스트 케이스: `fastapi_server/tests/classifier_test_cases.json` (유형별 50개, 총 300개)
+- 결과 파일: `fastapi_server/tests/classifier_results.md` / `classifier_results.csv`
+- 출력 형식: `| 질문 | 원하는 결과 | 실제 결과 | 통과 |`
 
 ---
 

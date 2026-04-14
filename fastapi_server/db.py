@@ -64,6 +64,7 @@ _VECTOR_SEARCH_SQL = """
         bl.thumbnail_url,
         1 - (be.embedding <=> %s::vector) AS score,
         bl.publication_year,
+        bl.edition,
         (SELECT b.book_code FROM books b WHERE b.book_list_id = bl.id AND b.is_active = true ORDER BY b.book_code LIMIT 1) AS book_code
     FROM book_embeddings be
     JOIN book_list bl ON bl.id = be.book_list_id
@@ -81,13 +82,14 @@ _VECTOR_SEARCH_SQL = """
 def _rows_to_dicts(rows) -> list[dict]:
     return [
         {
-            "book_list_id":    r[0],
-            "title":           r[1],
-            "difficulty":      r[2],
-            "thumbnail_url":   r[3],
-            "score":           float(r[4]),
+            "book_list_id":     r[0],
+            "title":            r[1],
+            "difficulty":       r[2],
+            "thumbnail_url":    r[3],
+            "score":            float(r[4]),
             "publication_year": r[5],
-            "book_code":       r[6] or f"D-{r[0]:03d}",
+            "edition":          r[6] or "",
+            "book_code":        r[7] or f"D-{r[0]:03d}",
         }
         for r in rows
     ]
@@ -97,43 +99,57 @@ def _rows_to_dicts(rows) -> list[dict]:
 _YEAR_RE = re.compile(r"20[2-3]\d")
 
 
-def _recency_sort_key(book: dict) -> float:
-    """최신 도서 우선 정렬을 위한 정렬 키.
+def _make_sort_key(is_certification: bool = False):
+    """정렬 키 팩토리. 항상 (primary, secondary) 튜플을 반환합니다.
 
-    우선순위: DB의 publication_year → 제목에서 연도 추출
-    원본 score는 변경하지 않고 정렬 키로만 사용합니다.
+    자격증 쿼리 (is_certification=True):
+      연도를 1차 키로 사용 → 2025 도서가 점수와 무관하게 항상 2024 도서 앞에 위치.
+      같은 연도 내에서는 score(+개정판 보너스) 순으로 정렬.
+        primary  = publication_year (0 → 연도 미상, 가장 낮은 우선순위)
+        secondary = score + edition_boost
 
-    가중치 기준 (현재 연도 = 2026 기준 예시):
-      2026 이상 → +0.05 (현재 연도)
-      2025      → +0.03 (1년 전)
-      2024~2023 → +0.01 (2~3년 전)
-      2022 이하 / 연도 없음 → +0.00
+    일반 쿼리 (is_certification=False):
+      연도 가중치를 score에 더해 단일 기준으로 정렬.
+        primary  = 0 (고정, 실질적으로 secondary만 사용)
+        secondary = score + year_boost + edition_boost
+          현재 연도 이상 → +0.05
+          1년 전         → +0.03
+          2~3년 전       → +0.01
+          4년 이상 전    → +0.00
+
+    개정판 보너스: edition 필드가 비어있지 않으면 +0.02
     """
-    # 1차: DB에 저장된 publication_year 사용
-    year = book.get("publication_year")
-
-    # 2차: 제목에서 직접 추출 (fallback)
-    if not year:
-        match = _YEAR_RE.search(book["title"])
-        if match:
-            year = int(match.group())
-
-    if not year:
-        return book["score"]
-
     current_year = datetime.now().year
-    diff = year - current_year
 
-    if diff >= 0:
-        boost = 0.05
-    elif diff == -1:
-        boost = 0.03
-    elif diff >= -3:
-        boost = 0.01
-    else:
-        boost = 0.00
+    def _key(book: dict) -> tuple:
+        # 1차: DB의 publication_year, 2차: 제목에서 추출
+        year = book.get("publication_year")
+        if not year:
+            match = _YEAR_RE.search(book["title"])
+            if match:
+                year = int(match.group())
 
-    return book["score"] + boost
+        edition_boost = 0.02 if book.get("edition") else 0.0
+        score = book["score"] + edition_boost
+
+        if is_certification:
+            # 연도를 독립적인 1차 정렬 키로 사용
+            # → 연도가 다르면 score 차이와 무관하게 최신 연도가 항상 앞에 위치
+            year_key = year or 0
+            return (year_key, score)
+        else:
+            # score에 연도 가중치를 더해 단일 기준으로 정렬
+            if year:
+                diff = year - current_year
+                if diff >= 0:
+                    score += 0.05
+                elif diff == -1:
+                    score += 0.03
+                elif diff >= -3:
+                    score += 0.01
+            return (0, score)
+
+    return _key
 
 
 def _vector_search_sync(
@@ -141,6 +157,7 @@ def _vector_search_sync(
     threshold: float,
     limit: int,
     difficulty: str | None = None,
+    is_certification: bool = False,
 ) -> list[dict]:
     """코사인 유사도 기반 도서 벡터 검색 (동기). difficulty 지정 시 필터 적용."""
     if difficulty:
@@ -156,8 +173,8 @@ def _vector_search_sync(
             rows = cur.fetchall()
 
     books = _rows_to_dicts(rows)
-    # 유사도 점수 기준으로 먼저 가져온 뒤, 최신 연도 도서 우선 재정렬
-    return sorted(books, key=_recency_sort_key, reverse=True)
+    # 유사도 점수 기준으로 먼저 가져온 뒤, 최신 연도 + 개정판 우선 재정렬
+    return sorted(books, key=_make_sort_key(is_certification), reverse=True)
 
 
 def _upsert_embedding_sync(book_list_id: int, embedding: list[float]) -> None:
@@ -182,10 +199,11 @@ async def vector_search(
     query_embedding: list[float],
     threshold: float,
     limit: int,
+    is_certification: bool = False,
 ) -> list[dict]:
     """코사인 유사도 기반 도서 벡터 검색 (async)."""
     return await asyncio.to_thread(
-        _vector_search_sync, query_embedding, threshold, limit
+        _vector_search_sync, query_embedding, threshold, limit, None, is_certification
     )
 
 
@@ -194,10 +212,11 @@ async def vector_search_by_difficulty(
     threshold: float,
     limit: int,
     difficulty: str | None = None,
+    is_certification: bool = False,
 ) -> list[dict]:
     """난이도 필터 포함 도서 벡터 검색 (async)."""
     return await asyncio.to_thread(
-        _vector_search_sync, query_embedding, threshold, limit, difficulty
+        _vector_search_sync, query_embedding, threshold, limit, difficulty, is_certification
     )
 
 
@@ -216,6 +235,7 @@ _KEYWORD_SEARCH_SQL = """
         bl.thumbnail_url,
         1.0 AS score,
         bl.publication_year,
+        bl.edition,
         (SELECT b.book_code FROM books b WHERE b.book_list_id = bl.id AND b.is_active = true ORDER BY b.book_code LIMIT 1) AS book_code
     FROM book_list bl
     WHERE EXISTS (
@@ -228,13 +248,17 @@ _KEYWORD_SEARCH_SQL = """
 
 
 def _keyword_search_sync(keyword: str) -> list[dict]:
-    """제목·설명 ILIKE 검색 (동기). limit 없이 전체 결과 반환."""
+    """제목·설명 ILIKE 검색 (동기). limit 없이 전체 결과 반환.
+
+    동일 제목의 개정판이 먼저 노출되도록 최신 연도 + 개정판 우선 정렬 적용.
+    """
     pattern = f"%{keyword}%"
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(_KEYWORD_SEARCH_SQL, (pattern, pattern))
             rows = cur.fetchall()
-    return _rows_to_dicts(rows)
+    books = _rows_to_dicts(rows)
+    return sorted(books, key=_make_sort_key(False), reverse=True)
 
 
 async def keyword_search(keyword: str) -> list[dict]:

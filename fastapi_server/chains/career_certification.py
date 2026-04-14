@@ -8,6 +8,7 @@ from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from chains.retriever import extract_certification_name, extract_exam_type
 from chains.utils import build_history_messages
 from llm import get_llm
 
@@ -30,18 +31,38 @@ def _build_messages(inputs: dict) -> list:
     books = inputs.get("books", [])
     history = inputs.get("history", [])
 
-    book_list = "\n".join(
-        "- {} {} (난이도: {})".format(
-            b.get("book_code") or "D-{:03d}".format(b["book_list_id"]),
-            b["title"],
-            b.get("difficulty", "미분류"),
-        )
-        for b in books
-    )
+    def _format_book(b: dict) -> str:
+        code = b.get("book_code") or "D-{:03d}".format(b["book_list_id"])
+        title = b["title"]
+        edition = b.get("edition", "")
+        year = b.get("publication_year")
+        difficulty = b.get("difficulty", "미분류")
 
-    user_content = f"""질문: {question}
+        meta_parts = []
+        if year:
+            meta_parts.append(f"{year}년판")
+        if edition:
+            meta_parts.append(edition)
+        meta = f" [{', '.join(meta_parts)}]" if meta_parts else ""
 
-검색된 도서 목록:
+        return f"- {code} {title}{meta} (난이도: {difficulty})"
+
+    book_list = "\n".join(_format_book(b) for b in books)
+
+    cert_name = extract_certification_name(question)
+    exam_type = extract_exam_type(question)
+
+    notices = []
+    if cert_name:
+        notices.append(f"요청 자격증: **{cert_name}** — 이 자격증 도서만 추천하고, 다른 등급 자격증 도서는 제외하세요.")
+    if exam_type:
+        opposite = "필기" if exam_type == "실기" else "실기"
+        notices.append(f"요청 시험 유형: **{exam_type}** — {opposite} 전용 도서는 추천하지 마세요. 단, '{exam_type} + {opposite} 올인원' 도서는 추천 가능합니다.")
+    cert_notice = ("\n" + "\n".join(notices)) if notices else ""
+
+    user_content = f"""질문: {question}{cert_notice}
+
+검색된 도서 목록 (최신 연도·개정판 우선 정렬):
 {book_list if book_list else '(검색된 도서 없음)'}
 
 위 목록에서 자격증 준비 또는 포트폴리오 완성에 적합한 도서를 추천하고,

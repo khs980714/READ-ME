@@ -12,6 +12,90 @@ from config import settings
 from db import keyword_search, vector_search, vector_search_by_difficulty
 from llm import get_embeddings
 
+# ── 자격증명 추출 패턴 ─────────────────────────────────────────
+# 우선순위: 산업기사 > 기술사 > 기능사 > 기사 (긴 접미사 먼저 → 오매칭 방지)
+_CERT_NAME_RE = re.compile(
+    r'[가-힣]+(?:산업기사|기술사|기능사|기사)',
+)
+
+
+def extract_certification_name(question: str) -> str | None:
+    """질문에서 자격증명을 추출합니다.
+
+    예) "정보처리기사 실기 대비 도서" → "정보처리기사"
+        "정보처리산업기사 추천해줘"  → "정보처리산업기사"
+        "파이썬 도서 추천"           → None (자격증명 없음)
+    """
+    m = _CERT_NAME_RE.search(question)
+    return m.group() if m else None
+
+
+def filter_by_certification(cert_name: str, books: list[dict]) -> list[dict]:
+    """자격증명과 다른 등급의 자격증 도서를 필터링합니다.
+
+    도서 제목에서 자격증명을 추출한 뒤, 질문에 언급된 자격증명과 다르면 제외합니다.
+    제목에 자격증명이 없는 도서(일반 도서)는 유지합니다.
+
+    예) cert_name="정보처리기사" → "정보처리산업기사 실기" 제목의 도서 제외
+        cert_name="정보처리기사" → "파이썬 완벽 가이드" 제목의 도서 유지
+
+    필터링 결과가 비어있으면 원본 목록을 반환합니다 (안전 fallback).
+    """
+    filtered = []
+    for book in books:
+        title_cert = _CERT_NAME_RE.search(book["title"])
+        if title_cert is None:
+            filtered.append(book)
+        elif title_cert.group() == cert_name:
+            filtered.append(book)
+
+    return filtered if filtered else books
+
+
+def extract_exam_type(question: str) -> str | None:
+    """질문에서 시험 유형(실기/필기)을 추출합니다.
+
+    둘 다 포함되거나 둘 다 없으면 None 반환 (필터링 불필요).
+    """
+    has_silgi = "실기" in question
+    has_pilgi = "필기" in question
+    if has_silgi and not has_pilgi:
+        return "실기"
+    if has_pilgi and not has_silgi:
+        return "필기"
+    return None
+
+
+def filter_by_exam_type(exam_type: str, books: list[dict]) -> list[dict]:
+    """시험 유형(실기/필기)과 맞지 않는 도서를 필터링합니다.
+
+    판단 기준 (제목 기준):
+      - 요청 유형만 포함 → 유지
+      - 요청 유형 + 반대 유형 모두 포함 (예: '필기 + 실기 올인원') → 유지
+      - 반대 유형만 포함 → 제외
+      - 둘 다 없음 (일반 도서) → 유지
+
+    예) exam_type="실기"
+      "정보처리기사 실기"             → 유지 (실기 있음)
+      "정보처리기사 필기"             → 제외 (필기만 있음)
+      "정보처리기사 필기 + 실기 올인원" → 유지 (둘 다 있음)
+      "파이썬 완벽 가이드"            → 유지 (둘 다 없음)
+
+    필터링 결과가 비어있으면 원본 목록을 반환합니다 (안전 fallback).
+    """
+    opposite = "필기" if exam_type == "실기" else "실기"
+    filtered = []
+    for book in books:
+        title = book["title"]
+        has_target = exam_type in title
+        has_opposite = opposite in title
+        if has_opposite and not has_target:
+            # 반대 유형만 있음 → 제외
+            continue
+        filtered.append(book)
+
+    return filtered if filtered else books
+
 # 조회 의도 질문에서 기술·주제 키워드를 추출하기 위한 패턴 목록
 # 우선순위 순으로 적용 (앞 패턴이 먼저 매칭)
 _KEYWORD_EXTRACT_PATTERNS = [
@@ -73,17 +157,35 @@ async def retrieve_books_by_keyword(question: str) -> tuple[list, str]:
 
 
 async def retrieve_books(message: str, question_type: str) -> list:
-    """질문 임베딩 → 벡터 검색 (유사도 내림차순). 질문 유형별 threshold 적용."""
+    """질문 임베딩 → 벡터 검색 (유사도 내림차순). 질문 유형별 threshold 적용.
+
+    career_certification 유형:
+      - 최신 연도 가중치를 강화하여 최신 수험서를 우선 노출.
+      - 질문에 자격증명(예: 정보처리기사)이 명시된 경우, 다른 등급 자격증 도서를 후처리 필터링.
+    """
     threshold = _THRESHOLD_MAP.get(
         question_type,
         settings.RECOMMENDATION_THRESHOLD_SPECIFIC_SEARCH,
     )
     q_embedding = await get_embeddings(message, input_type="query")
-    return await vector_search(
+    is_certification = question_type == "career_certification"
+    books = await vector_search(
         query_embedding=q_embedding,
         threshold=threshold,
         limit=settings.RECOMMENDATION_MAX,
+        is_certification=is_certification,
     )
+
+    if is_certification:
+        cert_name = extract_certification_name(message)
+        if cert_name:
+            books = filter_by_certification(cert_name, books)
+
+        exam_type = extract_exam_type(message)
+        if exam_type:
+            books = filter_by_exam_type(exam_type, books)
+
+    return books
 
 
 async def retrieve_books_level_based(
