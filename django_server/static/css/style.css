@@ -557,5 +557,33 @@ button { cursor: pointer; font-family: inherit; }
   .detail-wrap { flex-direction: column; padding: 20px; }
   .detail-thumb { width: 140px; margin: 0 auto; }
   .book-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
-  /* filter-form: flex-wrap이 자동 처리하므로 별도 override 불필요 */
+
+  /* ── Filter Bar 모바일 레이아웃 ── */
+  .filter-form {
+    flex-direction: column;
+  }
+  .search-box {
+    width: 100%;
+    min-width: 0;
+    flex: none;
+  }
+  .filter-controls {
+    width: 100%;
+    flex-shrink: 1;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  /* 난이도·카테고리 select: 각 행 절반씩 꽉 채움 */
+  .filter-controls .filter-select {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+    width: auto;
+  }
+  /* 검색·초기화 버튼: 필터 아래 행, 각각 절반씩 꽉 채움 */
+  .filter-controls .btn-primary,
+  .filter-controls .btn-ghost {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+    justify-content: center;
+  }
 }

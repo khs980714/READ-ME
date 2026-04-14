@@ -535,7 +535,6 @@
       info.innerHTML = `
         <div style="font-weight:600; font-size:0.9rem; margin-bottom:3px;">${escHtml(c.title)}</div>
         <div style="font-size:0.8rem; color:var(--text-muted);">${escHtml(c.author)} · ${escHtml(c.publisher)}</div>
-        ${c.isbn ? `<div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">ISBN: ${escHtml(c.isbn)}</div>` : ""}
       `;
 
       const selectBtn = document.createElement("button");

@@ -79,7 +79,6 @@ class BookList(models.Model):
     difficulty = models.CharField(
         max_length=10, choices=Difficulty.choices, blank=True, verbose_name="난이도"
     )
-    isbn = models.CharField(max_length=20, blank=True, verbose_name="ISBN")
     thumbnail_url = models.URLField(max_length=500, blank=True, verbose_name="썸네일 URL")
     toc = models.TextField(blank=True, verbose_name="목차")
     categories = models.ManyToManyField(
@@ -182,10 +181,6 @@ class Book(models.Model):
     @property
     def thumbnail_url(self):
         return self.book_list.thumbnail_url
-
-    @property
-    def isbn(self):
-        return self.book_list.isbn
 
     @property
     def toc(self):

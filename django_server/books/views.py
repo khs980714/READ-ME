@@ -87,17 +87,6 @@ def book_detail(request, pk):
 # ── 도서 관리 (staff 전용) ─────────────────────────────────────
 
 @_staff_required
-def naver_search_api(request):
-    """네이버 도서 검색 API 프록시 — 도서 추가 팝오버용 (JSON)."""
-    query = request.GET.get("q", "").strip()
-    if not query:
-        return JsonResponse({"results": []})
-    from .services import search_naver_books
-    results = search_naver_books(query)
-    return JsonResponse({"results": results})
-
-
-@_staff_required
 def book_manage(request):
     q = request.GET.get("q", "").strip()
     qs = (
@@ -129,7 +118,8 @@ def book_add(request):
         author_name = request.POST.get("author", "").strip()
         publisher_name = request.POST.get("publisher", "").strip()
         difficulty = request.POST.get("difficulty", "")
-        isbn = request.POST.get("isbn", "").strip()
+        pub_year_str = request.POST.get("publication_year", "").strip()
+        publication_year = int(pub_year_str) if pub_year_str.isdigit() else None
         thumbnail_url = request.POST.get("thumbnail_url", "").strip()
         description = request.POST.get("description", "").strip()
         toc = request.POST.get("toc", "").strip()
@@ -149,7 +139,7 @@ def book_add(request):
                     publisher=publisher,
                     defaults={
                         "difficulty": difficulty,
-                        "isbn": isbn,
+                        "publication_year": publication_year,
                         "thumbnail_url": thumbnail_url,
                         "description": description,
                         "toc": toc,
@@ -159,7 +149,7 @@ def book_add(request):
                     # 같은 (title, edition, author, publisher)가 있으면 수집 정보만 갱신
                     book_list.edition = edition
                     book_list.difficulty = difficulty
-                    book_list.isbn = isbn
+                    book_list.publication_year = publication_year
                     book_list.thumbnail_url = thumbnail_url
                     book_list.description = description
                     book_list.toc = toc
@@ -207,7 +197,7 @@ def book_edit(request, pk):
         "author": book_list.author.name,
         "publisher": book_list.publisher.name,
         "difficulty": book_list.difficulty,
-        "isbn": book_list.isbn,
+        "publication_year": book_list.publication_year or "",
         "thumbnail_url": book_list.thumbnail_url,
         "description": book_list.description,
         "toc": book_list.toc,
@@ -220,7 +210,8 @@ def book_edit(request, pk):
         author_name = request.POST.get("author", "").strip()
         publisher_name = request.POST.get("publisher", "").strip()
         difficulty = request.POST.get("difficulty", "")
-        isbn = request.POST.get("isbn", "").strip()
+        pub_year_str = request.POST.get("publication_year", "").strip()
+        publication_year = int(pub_year_str) if pub_year_str.isdigit() else None
         thumbnail_url = request.POST.get("thumbnail_url", "").strip()
         description = request.POST.get("description", "").strip()
         toc = request.POST.get("toc", "").strip()
@@ -242,7 +233,7 @@ def book_edit(request, pk):
                 book_list.author = author
                 book_list.publisher = publisher
                 book_list.difficulty = difficulty
-                book_list.isbn = isbn
+                book_list.publication_year = publication_year
                 book_list.thumbnail_url = thumbnail_url
                 book_list.description = description
                 book_list.toc = toc

@@ -607,9 +607,6 @@ def apply_book_candidate(request):
         if info.get("description"):
             bl.description = info["description"]
             update_fields.append("description")
-        if info.get("isbn"):
-            bl.isbn = info["isbn"]
-            update_fields.append("isbn")
         if info.get("toc"):
             bl.toc = info["toc"]
             update_fields.append("toc")

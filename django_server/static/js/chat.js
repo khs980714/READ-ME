@@ -192,6 +192,7 @@ async function handleStreamSend(content) {
 
           } else if (event.type === "done") {
             const qtype = event.question_type;
+            convertTablesToList(bubble);
             if (qtype && qtype !== "out_of_scope") {
               const badge = document.createElement("span");
               badge.className = "qtype-badge";
@@ -262,6 +263,7 @@ function appendMessage(msg) {
   if (msg.role === "assistant") {
     bubble.classList.add("msg-bubble--markdown");
     bubble.innerHTML = renderMarkdown(msg.content);
+    convertTablesToList(bubble);
   } else {
     bubble.textContent = msg.content;
   }
@@ -304,9 +306,6 @@ function appendTyping() {
 }
 
 // ── 추천 카드 ────────────────────────────────────────────
-// 단계별 큐레이션 유형은 전체 카드를 바로 노출합니다.
-const FULL_VISIBLE_TYPES = new Set(["goal_oriented", "career_certification"]);
-
 function renderRecommendations(recs, qtype) {
   const section = document.createElement("div");
   section.className = "rec-section";
@@ -319,13 +318,12 @@ function renderRecommendations(recs, qtype) {
   const cardsWrap = document.createElement("div");
   cardsWrap.className = "rec-cards";
 
-  const showAll = FULL_VISIBLE_TYPES.has(qtype);
-  const visible = showAll ? recs : recs.slice(0, VISIBLE_CARDS);
-
+  // 항상 최대 3권만 노출, 초과분은 더보기 버튼으로 모달에 표시
+  const visible = recs.slice(0, VISIBLE_CARDS);
   visible.forEach((rec) => cardsWrap.appendChild(makeCard(rec)));
   section.appendChild(cardsWrap);
 
-  if (!showAll && recs.length > VISIBLE_CARDS) {
+  if (recs.length > VISIBLE_CARDS) {
     const moreBtn = document.createElement("button");
     moreBtn.className = "btn-more";
     moreBtn.textContent = `더보기 (총 ${recs.length}권)`;
@@ -464,6 +462,46 @@ if (btnResetChat) {
   btnResetChat.addEventListener("click", () => {
     if (!confirm("대화 내용을 모두 초기화할까요?")) return;
     location.reload();
+  });
+}
+
+// ── 모바일: 테이블 → 카드 리스트 변환 ────────────────────
+function convertTablesToList(container) {
+  if (window.innerWidth > 768) return;
+  container.querySelectorAll("table").forEach((table) => {
+    const headers = [...table.querySelectorAll("thead th")].map((th) => th.textContent.trim());
+    const rows = table.querySelectorAll("tbody tr");
+
+    const list = document.createElement("div");
+    list.className = "mobile-table-list";
+
+    rows.forEach((row) => {
+      const card = document.createElement("div");
+      card.className = "mobile-table-card";
+
+      row.querySelectorAll("td").forEach((cell, i) => {
+        const item = document.createElement("div");
+        item.className = "mobile-table-item";
+
+        if (headers[i]) {
+          const lbl = document.createElement("span");
+          lbl.className = "mobile-table-label";
+          lbl.textContent = headers[i] + ":";
+          item.appendChild(lbl);
+        }
+
+        const val = document.createElement("span");
+        val.className = "mobile-table-value";
+        val.innerHTML = cell.innerHTML;
+        item.appendChild(val);
+
+        card.appendChild(item);
+      });
+
+      list.appendChild(card);
+    });
+
+    table.parentNode.replaceChild(list, table);
   });
 }
 

@@ -9,13 +9,13 @@ class BookListCategoryInline(admin.TabularInline):
 
 @admin.register(BookList)
 class BookListAdmin(admin.ModelAdmin):
-    list_display = ("title", "edition", "publication_year", "author", "publisher", "difficulty", "isbn", "updated_at")
+    list_display = ("title", "edition", "publication_year", "author", "publisher", "difficulty", "updated_at")
     list_filter = ("difficulty", "publisher", "categories")
-    search_fields = ("title", "edition", "author__name", "isbn")
+    search_fields = ("title", "edition", "author__name")
     readonly_fields = ("created_at", "updated_at")
     inlines = [BookListCategoryInline]
     fieldsets = (
-        ("기본 정보", {"fields": ("title", "edition", "publication_year", "author", "publisher", "isbn")}),
+        ("기본 정보", {"fields": ("title", "edition", "publication_year", "author", "publisher")}),
         ("수집 정보", {"fields": ("thumbnail_url", "description", "toc", "difficulty")}),
         ("날짜", {"fields": ("created_at", "updated_at")}),
     )

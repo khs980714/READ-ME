@@ -98,7 +98,7 @@ def fetch_aladin_book_info(title: str, max_results: int = 5) -> tuple[dict | Non
     """알라딘 Open API(TTB)로 도서 정보 조회.
 
     반환: (primary_info, candidates)
-      primary_info: 첫 번째 결과의 thumbnail/description/isbn/toc, 없으면 None
+      primary_info: 첫 번째 결과의 thumbnail/description/toc, 없으면 None
       candidates:   최대 max_results개의 후보 목록 (도서 선택 팝오버용)
 
     ALADIN_TTB_KEY 미설정 시 (None, []) 반환.
@@ -133,7 +133,6 @@ def fetch_aladin_book_info(title: str, max_results: int = 5) -> tuple[dict | Non
                 "author":        it.get("author", ""),
                 "publisher":     it.get("publisher", ""),
                 "thumbnail_url": it.get("cover", ""),
-                "isbn":          it.get("isbn13", ""),
                 "item_id":       str(it.get("itemId", "")),
             }
             for it in items
@@ -143,7 +142,6 @@ def fetch_aladin_book_info(title: str, max_results: int = 5) -> tuple[dict | Non
         result: dict = {
             "thumbnail_url": item.get("cover", ""),
             "description":   item.get("description", "")[:2000],
-            "isbn":          item.get("isbn13", ""),
         }
 
         # 2단계: ItemId로 목차(toc) 조회
@@ -206,7 +204,6 @@ def fetch_aladin_by_item_id(item_id: str) -> dict | None:
         result = {
             "thumbnail_url": item.get("cover", ""),
             "description":   item.get("description", "")[:2000],
-            "isbn":          item.get("isbn13", ""),
             "toc":           sub_info.get("toc", "")[:3000],
         }
         return result if any(v for v in result.values()) else None
@@ -332,12 +329,12 @@ def fetch_book_info_with_fallback(
 
     return_candidates=True이면 (collected, aladin_candidates) 튜플 반환.
     """
-    collected: dict = {"thumbnail_url": "", "description": "", "isbn": "", "toc": ""}
+    collected: dict = {"thumbnail_url": "", "description": "", "toc": ""}
 
     # 1차: 알라딘 API (후보 목록 포함)
     aladin_info, candidates = fetch_aladin_book_info(title)
     if aladin_info:
-        for key in ("thumbnail_url", "isbn", "toc"):
+        for key in ("thumbnail_url", "toc"):
             if aladin_info.get(key):
                 collected[key] = aladin_info[key]
         if aladin_info.get("description"):
@@ -380,47 +377,6 @@ def fetch_book_info_with_fallback(
 
 # 내부 backward-compat alias
 _fetch_book_info_with_fallback = fetch_book_info_with_fallback
-
-
-# ── Naver Book Search API (도서 추가 팝오버 검색용) ───────────
-
-NAVER_BOOK_URL = "https://openapi.naver.com/v1/search/book.json"
-
-
-def _naver_headers():
-    return {
-        "X-Naver-Client-Id":     getattr(settings, "NAVER_CLIENT_ID", ""),
-        "X-Naver-Client-Secret": getattr(settings, "NAVER_CLIENT_SECRET", ""),
-    }
-
-
-def search_naver_books(query: str, display: int = 5) -> list[dict]:
-    """Naver Book Search API — 여러 결과 반환 (도서 추가 검색 팝오버용)."""
-    try:
-        resp = requests.get(
-            NAVER_BOOK_URL,
-            headers=_naver_headers(),
-            params={"query": query, "display": display},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        items = resp.json().get("items", [])
-        results = []
-        for item in items:
-            raw_author = _strip_html(item.get("author", ""))
-            author_str = raw_author.replace("^", ", ")
-            results.append({
-                "title":         _strip_html(item.get("title", "")),
-                "author":        author_str,
-                "publisher":     _strip_html(item.get("publisher", "")),
-                "thumbnail_url": item.get("image", ""),
-                "description":   _strip_html(item.get("description", "")),
-                "isbn":          item.get("isbn", "").split()[-1] if item.get("isbn") else "",
-            })
-        return results
-    except Exception as exc:
-        logger.warning("Naver API 검색 오류 (%s): %s", query, exc)
-        return []
 
 
 # ── 유틸 ─────────────────────────────────────────────────────
@@ -493,7 +449,7 @@ def run_booklist_pipeline(
     """도서 데이터 수집 파이프라인 (BookList 단위 중복 방지):
 
     1. 알라딘 API → YES24 → 교보문고 순으로 fallback 수집
-       (description·isbn·thumbnail·toc 중 비어있는 필드만 채움)
+       (description·thumbnail·toc 중 비어있는 필드만 채움)
     2. LLM 난이도 분류 (difficulty 없을 때만, description 기반)
     3. 임베딩 생성 (embedding 없을 때만)
 
@@ -514,7 +470,6 @@ def run_booklist_pipeline(
     # 1) 수집이 필요한 필드가 하나라도 비어있으면 멀티소스 수집
     needs_collect = (
         not book_list.description
-        or not book_list.isbn
         or not book_list.thumbnail_url
         or not book_list.toc
     )
@@ -529,9 +484,6 @@ def run_booklist_pipeline(
         if info.get("description") and not book_list.description:
             book_list.description = info["description"]
             update_fields.append("description")
-        if info.get("isbn") and not book_list.isbn:
-            book_list.isbn = info["isbn"]
-            update_fields.append("isbn")
         if info.get("toc") and not book_list.toc:
             book_list.toc = info["toc"]
             update_fields.append("toc")
@@ -587,9 +539,6 @@ def collect_book_data(book_list, force: bool = False) -> dict:
     if info.get("description") and (force or not book_list.description):
         book_list.description = info["description"]
         update_fields.append("description")
-    if info.get("isbn") and (force or not book_list.isbn):
-        book_list.isbn = info["isbn"]
-        update_fields.append("isbn")
     if info.get("toc") and (force or not book_list.toc):
         book_list.toc = info["toc"]
         update_fields.append("toc")

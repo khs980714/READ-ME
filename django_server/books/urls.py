@@ -9,7 +9,6 @@ urlpatterns = [
     # 도서 관리 (staff 전용)
     path("manage/", views.book_manage, name="manage"),
     path("manage/add/", views.book_add, name="add"),
-    path("api/naver-search/", views.naver_search_api, name="naver_search"),
     path("manage/<int:pk>/edit/", views.book_edit, name="edit"),
     path("manage/<int:pk>/delete/", views.book_delete, name="delete"),
     path("manage/<int:pk>/collect/", views.book_collect, name="collect"),

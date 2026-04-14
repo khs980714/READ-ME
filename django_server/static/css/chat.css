@@ -17,7 +17,8 @@
 
 /* chat-page: topbar·footer 숨김으로 높이 재계산 */
 .chat-page .chat-layout {
-  height: calc(100vh - 48px); /* navbar 48, footer hidden */
+  height: calc(100vh - 48px); /* fallback */
+  height: calc(100dvh - 48px); /* Safari/modern: 동적 뷰포트 (주소창 포함 대응) */
 }
 
 /* ── Sidebar ─────────────────────────────────────────────── */
@@ -601,10 +602,50 @@
   background: rgba(80, 65, 151, 0.08);
 }
 
+/* ── Mobile Table → Card List ────────────────────────────── */
+.mobile-table-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 10px 0;
+}
+.mobile-table-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mobile-table-item {
+  font-size: 0.84rem;
+  line-height: 1.6;
+  display: flex;
+  gap: 6px;
+}
+.mobile-table-label {
+  font-weight: 700;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+.mobile-table-value {
+  color: var(--text);
+  word-break: break-word;
+}
+
 /* ── Responsive ──────────────────────────────────────────── */
 @media (max-width: 768px) {
   .chat-sidebar { display: none; }
   .chat-messages { padding: 16px; }
-  .chat-input-wrap { padding: 12px 16px; }
+
+  /* Safari 하단 네비게이션 바 위에 입력창 배치 (safe-area-inset-bottom) */
+  .chat-input-wrap {
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  }
+
   .rec-card { width: 100%; }
+
+  /* iOS Safari 자동 확대 방지: font-size 16px 미만이면 포커스 시 zoom 발생 */
+  .chat-textarea { font-size: 16px; }
 }
