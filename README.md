@@ -10,11 +10,12 @@
 
 - 도서 썸네일·설명·목차·난이도·카테고리 정보를 한눈에 확인
 - 학습 로드맵, 수준별 추천, 일반 도서 질문에 응답하는 챗봇 (마크다운 렌더링 지원)
-- 관리자 전용 **데이터 수집 페이지** — 실시간 Progress Bar + 로그로 파이프라인 시각화
+- 관리자 전용 **데이터 수집 페이지** — 실시간 Progress Bar + 로그로 파이프라인 시각화, **중지 버튼** 지원
 - `book_list` 테이블로 중복 도서 수집 방지 (동일 책은 API 재호출 없이 재사용)
 - LLM 기반 **카테고리 자동 분류** — 도서 제목·설명을 분석해 12개 카테고리 중 1~3개 자동 태깅
 - **멀티소스 정보 수집** — 알라딘 API → YES24 → 교보문고 순 fallback으로 설명·목차 수집
 - **판차·출판 연도 자동 추출** — 제목에서 판차 정보 분리 저장, 연도 메타데이터 추출
+- **IP 기반 Rate Limiting** — FastAPI slowapi로 챗봇 API 과부하 방지
 
 ---
 
@@ -53,7 +54,7 @@ READ-ME/
 │   ├── books/                # 도서 앱 (BookList·Book 모델, 뷰, 관리자)
 │   ├── chat/                 # 챗봇 앱 (세션, 메시지, 추천)
 │   ├── data_pipeline/        # 데이터 수집 페이지 + 관리 커맨드
-│   │   ├── views.py          # 파이프라인 UI + SSE 스트림 뷰
+│   │   ├── views.py          # 파이프라인 UI + SSE 스트림 뷰 (중지 지원)
 │   │   ├── urls.py
 │   │   └── management/commands/
 │   │       ├── load_books.py
@@ -68,10 +69,24 @@ READ-ME/
 │   └── manage.py
 ├── fastapi_server/             # FastAPI 모델 서빙
 │   ├── routers/
-│   │   ├── chat.py           # 챗봇 추론 엔드포인트
+│   │   ├── chat.py           # 챗봇 추론 엔드포인트 (동기 + SSE 스트리밍)
 │   │   └── embed.py          # 임베딩 생성 엔드포인트 (book_list_id 기반)
 │   ├── chains/               # LangChain 체인 정의
+│   │   ├── classifier.py     # 질문 유형 분류기 (regex 사전 감지 + LLM)
+│   │   ├── keyword_search.py
+│   │   ├── specific_search.py
+│   │   ├── goal_oriented.py
+│   │   ├── level_based.py
+│   │   ├── career_certification.py
+│   │   ├── retriever.py      # pgvector 유사도 검색 + 후처리 필터
+│   │   └── utils.py
 │   ├── prompts/              # 프롬프트 템플릿
+│   ├── tests/
+│   │   ├── classifier_test_cases.json  # 유형별 50개, 총 300개 테스트 케이스
+│   │   ├── run_classifier_test.py      # 분류기 정확도 측정 스크립트
+│   │   └── locustfile.py               # 부하 테스트 (Locust)
+│   ├── limiter.py            # slowapi Rate Limiter
+│   ├── db.py                 # psycopg2 커넥션 풀
 │   └── main.py
 ├── infra/
 │   └── init.sql              # PostgreSQL 초기화 (pgvector 확장 활성화)
@@ -135,13 +150,14 @@ READ-ME/
 ## 챗봇 질문 유형
 
 LLM이 사용자의 질문을 6가지 유형으로 분류한 후, 유형별 전용 체인으로 응답합니다.
+조회·목록 의도가 명확한 패턴은 LLM 호출 없이 정규식으로 즉시 분류합니다.
 
 | 유형 | 설명 | 예시 |
 |---|---|---|
 | `keyword_search` | 특정 키워드 도서 목록 조회 | "AWS 도서 조회해줘", "파이썬 책 있어?" |
 | `specific_search` | 특정 기술·도구 추천 요청 | "스프링 부트 책 추천해줘", "리액트 공부할 책 알려줘" |
 | `goal_oriented` | 진로·직업 목표 기반 추천 | "프론트엔드 개발자가 되고 싶어", "데이터 엔지니어로 전직하고 싶어" |
-| `career_certification` | 자격증·코딩 테스트·취업 면접 준비 | "정보처리기사 실기 수험서", "코딩 테스트 준비 책 알려줘" |
+| `career_certification` | 자격증 취득·코딩 테스트·취업 면접 준비 | "정보처리기사 실기 수험서", "코딩 테스트 준비 책 알려줘" |
 | `level_based` | 수준·숙련도 기반 추천 | "파이썬 중급자용 책", "생초보를 위한 자바 책" |
 | `out_of_scope` | IT·개발 도서와 무관한 질문 | "오늘 날씨 어때?", "요리책 추천해줘" |
 
@@ -179,6 +195,7 @@ LLM(NVIDIA NIM)이 도서 제목과 설명을 분석하여 아래 12개 카테�
 관리자 계정으로 로그인 후 상단 **데이터 수집** 탭에서 각 버튼 클릭:
 - 실시간 Progress Bar로 진행 현황 확인
 - 도서별 성공/실패/에러 메시지 로그 표시
+- **중지 버튼**으로 실행 중인 파이프라인을 즉시 중단 가능
 
 | 파이프라인 | 설명 |
 |---|---|
@@ -247,7 +264,7 @@ cp .env.example .env
 ### 사전 준비
 
 1. **Docker Desktop** 설치 및 실행
-2. **NVIDIA API 키**, **Naver API 키** 발급
+2. **NVIDIA API 키**, **알라딘 TTB API 키** 발급
 
 ### 빠른 시작
 
@@ -352,6 +369,27 @@ docker exec read-me-fastapi_server-1 python tests/run_classifier_test.py
 - 결과 파일: `fastapi_server/tests/classifier_results.md` / `classifier_results.csv`
 - 출력 형식: `| 질문 | 원하는 결과 | 실제 결과 | 통과 |`
 
+### 부하 테스트 (Locust)
+
+FastAPI 서버의 동시 처리 성능을 측정할 수 있습니다.
+
+```bash
+# 패키지 설치
+pip install locust
+
+# 웹 UI 모드 (http://localhost:8089)
+locust -f fastapi_server/tests/locustfile.py --host http://localhost:8001
+
+# 헤드리스 모드 (HTML 리포트 생성)
+locust -f fastapi_server/tests/locustfile.py \
+    --host http://localhost:8001 \
+    --headless -u 20 -r 5 --run-time 60s \
+    --html fastapi_server/tests/load_report.html
+```
+
+- 시나리오: `/health`, `/chat/message` (동기), `/chat/message/stream` (SSE) — 6가지 질문 유형 고루 사용
+- 결과 파일: `load_report.html`, `load_stats_*.csv`
+
 ---
 
 ## 트러블슈팅
@@ -385,4 +423,14 @@ ALLOWED_HOSTS=localhost,127.0.0.1,your-server-ip
 ```bash
 # pgvector 확장 수동 활성화
 docker compose exec db psql -U readme -d readme_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```
+
+### FastAPI 임베딩 차원 불일치 오류
+
+`RuntimeError: 임베딩 차원 불일치` 가 발생하면 DB 컬럼 차원과 `EMBEDDING_DIM` 설정을 확인하세요.
+
+```bash
+# 현재 DB 차원 확인
+docker compose exec db psql -U readme -d readme_db \
+    -c "SELECT vector_dims(embedding) FROM book_embeddings LIMIT 1;"
 ```
