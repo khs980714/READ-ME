@@ -31,7 +31,11 @@ def _build_messages(inputs: dict) -> list:
     history = inputs.get("history", [])
 
     book_list = "\n".join(
-        f"- [{b.get('book_code', b['book_list_id'])}] {b['title']} (난이도: {b.get('difficulty', '미분류')})"
+        "- {} {} (난이도: {})".format(
+            b.get("book_code") or "D-{:03d}".format(b["book_list_id"]),
+            b["title"],
+            b.get("difficulty", "미분류"),
+        )
         for b in books
     )
 

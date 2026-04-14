@@ -277,6 +277,16 @@
     .form-grid--3 { grid-template-columns: 1fr 1fr; }
     .naver-search-row { flex-direction: column; }
     .naver-search-row .btn-primary { width: 100%; justify-content: center; }
+    .mode-toggle { flex-direction: column; }
+    .mode-tab { width: 100%; justify-content: center; }
+    .form-actions { flex-direction: column; }
+    .form-actions .btn-primary,
+    .form-actions .btn-ghost { width: 100%; justify-content: center; text-align: center; }
+  }
+
+  @media (max-width: 400px) {
+    .form-grid--3 { grid-template-columns: 1fr; }
+    .form-section { padding-bottom: 16px; margin-bottom: 20px; }
   }
 </style>
 {% endblock %}

@@ -69,22 +69,28 @@ def send_message(request):
         question_type=data.get("question_type", ""),
     )
 
+    raw_recs = data.get("recommendations", [])
+    books_by_bl_id = _bulk_fetch_books(raw_recs)
     recommendations_out = []
-    for rec in data.get("recommendations", []):
+    for rec in raw_recs:
         book_list_id = rec.get("book_list_id")
         if not book_list_id:
             continue
-        book = Book.objects.filter(book_list_id=book_list_id, is_active=True).select_related(
-            "book_list__publisher", "book_list__author"
-        ).first()
+        book = books_by_bl_id.get(book_list_id)
         if not book:
             continue
-        ChatRecommendation.objects.create(
-            message=assistant_msg,
-            book=book,
-            similarity_score=rec.get("score", 0.0),
-            rank=rec.get("rank", 1),
-        )
+        try:
+            ChatRecommendation.objects.get_or_create(
+                message=assistant_msg,
+                book=book,
+                defaults={
+                    "similarity_score": rec.get("score", 0.0),
+                    "rank": rec.get("rank", 1),
+                },
+            )
+        except Exception as exc:
+            logger.error("추천 저장 오류 (book_list_id=%s): %s", book_list_id, exc)
+            continue
         recommendations_out.append({
             "id": book.pk,
             "title": book.book_list.title,
@@ -175,16 +181,26 @@ def stream_message(request):
     return response
 
 
+def _bulk_fetch_books(raw_recs: list) -> dict:
+    """book_list_id 목록을 한 번에 조회하여 {book_list_id: Book} 딕셔너리로 반환."""
+    book_list_ids = [r["book_list_id"] for r in raw_recs if r.get("book_list_id")]
+    if not book_list_ids:
+        return {}
+    return {
+        b.book_list_id: b
+        for b in Book.objects.filter(book_list_id__in=book_list_ids, is_active=True)
+        .select_related("book_list__publisher", "book_list__author")
+    }
+
+
 def _enrich_recommendations(raw_recs: list) -> list:
-    """book_list_id → Book 조회 후 프런트엔드에 필요한 전체 필드 반환."""
+    """book_list_id → Book 일괄 조회 후 프런트엔드에 필요한 전체 필드 반환."""
+    if not raw_recs:
+        return []
+    books_by_bl_id = _bulk_fetch_books(raw_recs)
     result = []
     for rec in raw_recs:
-        book_list_id = rec.get("book_list_id")
-        if not book_list_id:
-            continue
-        book = Book.objects.filter(book_list_id=book_list_id, is_active=True).select_related(
-            "book_list__publisher", "book_list__author"
-        ).first()
+        book = books_by_bl_id.get(rec.get("book_list_id"))
         if not book:
             continue
         result.append({
@@ -209,18 +225,38 @@ def _save_stream_result(session: ChatSession, user_msg: ChatMessage, accumulated
             content=accumulated["answer"],
             question_type=accumulated["question_type"],
         )
-        for rec in accumulated["recommendations"]:
-            book_list_id = rec.get("book_list_id")
-            if not book_list_id:
-                continue
-            book = Book.objects.filter(book_list_id=book_list_id, is_active=True).first()
-            if not book:
-                continue
-            ChatRecommendation.objects.create(
+    except Exception as exc:
+        logger.error("어시스턴트 메시지 저장 오류: %s", exc)
+        return
+
+    raw_recs = accumulated.get("recommendations", [])
+    if not raw_recs:
+        return
+
+    # book_list_id 목록을 한 번에 조회하여 N+1 쿼리 방지
+    book_list_ids = [r["book_list_id"] for r in raw_recs if r.get("book_list_id")]
+    books_by_bl_id = {
+        b.book_list_id: b
+        for b in Book.objects.filter(book_list_id__in=book_list_ids, is_active=True)
+    }
+
+    for rec in raw_recs:
+        book_list_id = rec.get("book_list_id")
+        if not book_list_id:
+            logger.warning("추천 항목에 book_list_id 없음: %s", rec)
+            continue
+        book = books_by_bl_id.get(book_list_id)
+        if not book:
+            logger.warning("book_list_id=%s 에 해당하는 활성 Book 없음", book_list_id)
+            continue
+        try:
+            ChatRecommendation.objects.get_or_create(
                 message=assistant_msg,
                 book=book,
-                similarity_score=rec.get("score", 0.0),
-                rank=rec.get("rank", 1),
+                defaults={
+                    "similarity_score": rec.get("score", 0.0),
+                    "rank": rec.get("rank", 1),
+                },
             )
-    except Exception as exc:
-        logger.error("스트리밍 결과 저장 오류: %s", exc)
+        except Exception as exc:
+            logger.error("추천 저장 오류 (book_list_id=%s): %s", book_list_id, exc)

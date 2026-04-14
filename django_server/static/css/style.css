@@ -460,6 +460,10 @@ button { cursor: pointer; font-family: inherit; }
 }
 .empty-state svg { width: 48px; height: 48px; margin: 0 auto 16px; opacity: .4; }
 .empty-state p { font-size: 1rem; margin-bottom: 20px; }
+.empty-suggest-label { font-size: 0.88rem; color: var(--text-sub); margin-bottom: 12px !important; }
+.empty-suggest-cats { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-bottom: 20px; }
+.badge--link { text-decoration: none; cursor: pointer; transition: opacity 0.15s; }
+.badge--link:hover { opacity: 0.75; }
 
 /* ── Book Detail ─────────────────────────────────────────── */
 .detail-back { margin-bottom: 20px; }
@@ -526,6 +530,16 @@ button { cursor: pointer; font-family: inherit; }
 .section-title { font-size: 1.05rem; font-weight: 700; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
 .desc-body { font-size: 0.92rem; line-height: 1.8; color: var(--text-sub); }
 
+/* ── TOC 계층 렌더링 ─────────────────────────────────────── */
+.toc-body { font-size: 0.92rem; }
+.toc-list { list-style: none; padding: 0; margin: 0; }
+.toc-item { padding: 3px 0; color: var(--text-sub); line-height: 1.5; }
+.toc-item.toc-header { font-weight: 600; color: var(--text); margin-top: 10px; }
+.toc-item.toc-depth-0 { padding-left: 0; }
+.toc-item.toc-depth-1 { padding-left: 16px; font-size: 0.88rem; }
+.toc-item.toc-depth-2 { padding-left: 32px; font-size: 0.84rem; color: var(--text-muted); }
+.toc-item.toc-depth-3 { padding-left: 48px; font-size: 0.82rem; color: var(--text-muted); }
+
 /* ── Footer ──────────────────────────────────────────────── */
 .footer {
   background: var(--text);
@@ -534,6 +548,7 @@ button { cursor: pointer; font-family: inherit; }
   padding: 20px;
   font-size: 0.82rem;
 }
+.chat-page .footer { display: none; }
 
 /* ── Responsive ──────────────────────────────────────────── */
 @media (max-width: 768px) {

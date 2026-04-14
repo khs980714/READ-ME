@@ -55,18 +55,19 @@
         </div>
       </li>
     </ul>
-    <!-- 스트리밍 토글 -->
-    <div class="stream-toggle-row">
-      <span class="stream-label">스트리밍 응답</span>
-      <label class="stream-switch">
-        <input type="checkbox" id="streamToggle">
-        <span class="stream-slider"></span>
-      </label>
-      <span class="stream-status" id="streamStatus">OFF</span>
-    </div>
-
-    <div class="sidebar-actions">
-      <button class="btn-ghost btn-reset-chat" id="btnResetChat">대화 초기화</button>
+    <!-- 하단 고정 영역 (스트리밍 토글 + 대화 초기화) -->
+    <div class="sidebar-bottom">
+      <div class="stream-toggle-row">
+        <span class="stream-label">스트리밍 응답</span>
+        <label class="stream-switch">
+          <input type="checkbox" id="streamToggle">
+          <span class="stream-slider"></span>
+        </label>
+        <span class="stream-status" id="streamStatus">OFF</span>
+      </div>
+      <div class="sidebar-actions">
+        <button class="btn-ghost btn-reset-chat" id="btnResetChat">대화 초기화</button>
+      </div>
     </div>
   </aside>
 

@@ -28,6 +28,13 @@
         {% endfor %}
       </select>
 
+      <select name="category" class="filter-select">
+        <option value="">카테고리 전체</option>
+        {% for cat in categories %}
+          <option value="{{ cat.id }}" {% if selected_category == cat.id|stringformat:"s" %}selected{% endif %}>{{ cat.name }}</option>
+        {% endfor %}
+      </select>
+
       <button type="submit" class="btn-primary">검색</button>
       <a href="{% url 'books:list' %}" class="btn-ghost">초기화</a>
     </div>
@@ -66,6 +73,9 @@
         {% if book.difficulty %}
           <span class="badge badge--{{ book.difficulty }}">{{ book.difficulty }}</span>
         {% endif %}
+        {% for cat in book.categories.all|slice:":2" %}
+          <span class="badge badge--category">{{ cat.name }}</span>
+        {% endfor %}
         <span class="book-code">{{ book.book_code }}</span>
       </div>
       <h3 class="book-title">{{ book.title }}</h3>
@@ -97,6 +107,9 @@
         {% if book.difficulty %}
           <span class="badge badge--{{ book.difficulty }}">{{ book.difficulty }}</span>
         {% endif %}
+        {% for cat in book.categories.all|slice:":2" %}
+          <span class="badge badge--category">{{ cat.name }}</span>
+        {% endfor %}
         <span class="book-code">{{ book.book_code }}</span>
       </div>
       <h3 class="book-title">{{ book.title }}</h3>
@@ -114,6 +127,14 @@
     <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
   </svg>
   <p>검색 결과가 없습니다.</p>
+  {% if suggested_categories %}
+  <p class="empty-suggest-label">다른 카테고리를 탐색해 보세요.</p>
+  <div class="empty-suggest-cats">
+    {% for cat in suggested_categories %}
+      <a href="{% url 'books:list' %}?category={{ cat.id }}" class="badge badge--category badge--link">{{ cat.name }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
   <a href="{% url 'books:list' %}" class="btn-ghost">전체 목록 보기</a>
 </div>
 {% endif %}

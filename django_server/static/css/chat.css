@@ -15,9 +15,9 @@
   overflow: hidden;
 }
 
-/* chat-page: topbar 숨김으로 높이 재계산 */
+/* chat-page: topbar·footer 숨김으로 높이 재계산 */
 .chat-page .chat-layout {
-  height: calc(100vh - 48px - 56px); /* navbar 48 + footer 56 */
+  height: calc(100vh - 48px); /* navbar 48, footer hidden */
 }
 
 /* ── Sidebar ─────────────────────────────────────────────── */
@@ -60,15 +60,21 @@
 
 .btn-reset-chat { width: 100%; justify-content: center; }
 
+/* ── Sidebar Bottom (토글 + 초기화 묶음) ─────────────────── */
+.sidebar-bottom {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 /* ── Streaming Toggle ─────────────────────────────────────── */
 .stream-toggle-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: auto;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-  margin-bottom: 8px;
 }
 
 .stream-label {
@@ -229,6 +235,7 @@
 }
 
 .rec-card-thumb {
+  position: relative;
   width: 44px;
   height: 58px;
   border-radius: 4px;
@@ -237,6 +244,24 @@
   flex-shrink: 0;
 }
 .rec-card-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.rec-card-rank {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 3px;
+  pointer-events: none;
+}
+.rec-card-score {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
 .rec-card-thumb-placeholder {
   width: 100%;
   height: 100%;

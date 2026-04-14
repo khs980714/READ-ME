@@ -227,7 +227,7 @@ def fetch_yes24_book_info(title: str) -> dict | None:
         )
         resp = requests.get(search_url, headers=headers, timeout=10)
         resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "lxml")
+        soup = BeautifulSoup(resp.text, "html.parser")
 
         link_tag = soup.select_one(".itemName a")
         if not link_tag:
@@ -236,7 +236,7 @@ def fetch_yes24_book_info(title: str) -> dict | None:
 
         time.sleep(0.5)
         resp2 = requests.get(product_url, headers=headers, timeout=10)
-        soup2 = BeautifulSoup(resp2.text, "lxml")
+        soup2 = BeautifulSoup(resp2.text, "html.parser")
 
         result: dict = {}
 
@@ -281,7 +281,7 @@ def fetch_kyobo_book_info(title: str) -> dict | None:
         )
         resp = requests.get(search_url, headers=headers, timeout=10)
         resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "lxml")
+        soup = BeautifulSoup(resp.text, "html.parser")
 
         link_tag = soup.select_one(".prod_name a")
         if not link_tag:
@@ -292,7 +292,7 @@ def fetch_kyobo_book_info(title: str) -> dict | None:
 
         time.sleep(0.5)
         resp2 = requests.get(product_url, headers=headers, timeout=10)
-        soup2 = BeautifulSoup(resp2.text, "lxml")
+        soup2 = BeautifulSoup(resp2.text, "html.parser")
 
         result: dict = {}
 

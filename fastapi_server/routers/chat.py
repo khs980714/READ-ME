@@ -1,10 +1,12 @@
 import json as _json
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from openai import RateLimitError
 from pydantic import BaseModel
+
+from limiter import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +146,8 @@ _RATE_LIMIT_MSG = "AI 서버가 잠시 바쁩니다. 잠시 후 다시 시도해
 
 
 @router.post("/message", response_model=ChatResponse)
-async def chat_message(req: ChatRequest):
+@limiter.limit("30/minute")
+async def chat_message(request: Request, req: ChatRequest):
     try:
         # 1) 분류 → 검색
         question_type, retrieved, chain_input = await _classify_and_retrieve(req)
@@ -172,7 +175,8 @@ async def chat_message(req: ChatRequest):
 
 
 @router.post("/message/stream")
-async def chat_message_stream(req: ChatRequest):
+@limiter.limit("30/minute")
+async def chat_message_stream(request: Request, req: ChatRequest):
     """SSE 스트리밍 응답 엔드포인트."""
 
     async def generate():

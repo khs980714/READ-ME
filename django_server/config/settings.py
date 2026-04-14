@@ -117,8 +117,27 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# ── Cache ──────────────────────────────────────────────────────
+# 메모리 캐시: 카테고리 목록, 파이프라인 통계 등 자주 조회되는 데이터에 사용
+# Redis 도입 시 BACKEND를 django_redis.cache.RedisCache로 교체하세요.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "readme-cache",
+    }
+}
+
 # ── JWT ───────────────────────────────────────────────────────
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", SECRET_KEY)
+_jwt_secret_env = os.getenv("JWT_SECRET_KEY", "")
+if not _jwt_secret_env:
+    import warnings
+    warnings.warn(
+        "JWT_SECRET_KEY 환경변수가 설정되지 않았습니다. "
+        "DJANGO_SECRET_KEY를 fallback으로 사용합니다. "
+        "프로덕션 환경에서는 별도의 JWT_SECRET_KEY를 반드시 설정하세요.",
+        stacklevel=2,
+    )
+JWT_SECRET_KEY = _jwt_secret_env or SECRET_KEY
 # Access token: 요청마다 검증, 짧게 유지
 JWT_ACCESS_TOKEN_LIFETIME = timedelta(
     minutes=int(os.getenv("JWT_ACCESS_TOKEN_LIFETIME_MINUTES", "60"))
@@ -136,5 +155,3 @@ NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET", "")
 ALADIN_TTB_KEY = os.getenv("ALADIN_TTB_KEY", "")
 MODEL_SERVER_URL = os.getenv("MODEL_SERVER_URL", "http://localhost:8001")
 
-# ── Chat recommendation threshold ────────────────────────────
-RECOMMENDATION_THRESHOLD = float(os.getenv("RECOMMENDATION_THRESHOLD", "0.5"))

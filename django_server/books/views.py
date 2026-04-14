@@ -2,6 +2,7 @@ import logging
 import threading
 
 from django.contrib import messages
+from django.core.cache import cache
 from django.db import IntegrityError
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -9,6 +10,10 @@ from django.db.models import Q
 from django.views.decorators.http import require_POST
 
 from .models import Author, Book, BookList, Category, Publisher
+
+# 카테고리 목록 캐시 TTL (초) — 카테고리는 거의 변하지 않으므로 10분 캐시
+_CATEGORY_CACHE_KEY = "books:all_categories"
+_CATEGORY_CACHE_TTL = 600
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +52,16 @@ def book_list(request):
     if category_id:
         qs = qs.filter(book_list__categories__id=category_id)
 
-    categories = Category.objects.all()
+    categories = cache.get(_CATEGORY_CACHE_KEY)
+    if categories is None:
+        categories = list(Category.objects.all())
+        cache.set(_CATEGORY_CACHE_KEY, categories, _CATEGORY_CACHE_TTL)
     difficulties = BookList.Difficulty.choices
+
+    # 검색 결과 없을 때 카테고리 제안 목록 제공
+    suggested_categories = []
+    if not qs.exists() and (query or difficulty or category_id):
+        suggested_categories = categories[:8]
 
     return render(request, "books/list.html", {
         "books": qs,
@@ -57,6 +70,7 @@ def book_list(request):
         "selected_category": category_id,
         "categories": categories,
         "difficulties": difficulties,
+        "suggested_categories": suggested_categories,
     })
 
 
@@ -269,8 +283,22 @@ def book_edit(request, pk):
     })
 
 
+# 동시에 동일 book_list에 대한 임베딩 재생성이 중복 실행되는 것을 방지합니다.
+_embedding_in_progress: set[int] = set()
+_embedding_lock = threading.Lock()
+
+
 def _schedule_embedding_refresh(book_list_pk: int) -> None:
-    """임베딩 재생성을 백그라운드 스레드로 예약합니다."""
+    """임베딩 재생성을 백그라운드 스레드로 예약합니다.
+
+    동일 book_list_pk에 대한 재생성이 이미 진행 중이면 중복 실행을 생략합니다.
+    """
+    with _embedding_lock:
+        if book_list_pk in _embedding_in_progress:
+            logger.info("임베딩 재생성 이미 진행 중 — 생략 (book_list_pk=%s)", book_list_pk)
+            return
+        _embedding_in_progress.add(book_list_pk)
+
     def _run():
         try:
             from .models import BookList
@@ -279,6 +307,9 @@ def _schedule_embedding_refresh(book_list_pk: int) -> None:
             refresh_embedding(bl)
         except Exception as exc:
             logger.error("임베딩 재생성 오류 (book_list_pk=%s): %s", book_list_pk, exc)
+        finally:
+            with _embedding_lock:
+                _embedding_in_progress.discard(book_list_pk)
 
     threading.Thread(target=_run, daemon=True).start()
 

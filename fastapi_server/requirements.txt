@@ -20,3 +20,6 @@ pgvector>=0.3,<1.0            # pgvector Python 클라이언트
 python-dotenv>=1.0,<2.0
 pydantic>=2.8,<3.0
 pydantic-settings>=2.3,<3.0  # FastAPI 설정 관리
+
+# ── Rate Limiting ──────────────────────────────────────────────
+slowapi>=0.1.9,<1.0           # FastAPI 레이트 리밋 미들웨어

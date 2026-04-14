@@ -72,6 +72,13 @@
     color: var(--text-sub);
     min-height: 20px;
   }
+  .progress-step {
+    margin-top: 4px;
+    font-size: 0.78rem;
+    color: var(--primary);
+    font-style: italic;
+    min-height: 18px;
+  }
 
   /* Log */
   .log-wrap {
@@ -198,6 +205,7 @@
       <div class="progress-bar-fill" id="pipelineProgressBar"></div>
     </div>
     <p class="progress-current" id="pipelineCurrent"></p>
+    <p class="progress-step" id="pipelineStep"></p>
   </div>
   <div class="log-wrap" id="pipelineLogWrap" style="display:none;">
     <div id="pipelineLog"></div>
@@ -596,7 +604,7 @@
   // ── SSE 스트림 핸들러 팩토리 ─────────────────────────────────
   function createStreamHandler({ runUrl, streamBase, btn, stopBtn, statusBadge,
                                   progressWrap, progressBar, progressText, progressPct,
-                                  currentEl, logWrap, logContainer,
+                                  currentEl, stepEl, logWrap, logContainer,
                                   startLabel }) {
     let es = null;
     let currentJobId = null;
@@ -672,9 +680,13 @@
         if (ev.type === "start") {
           appendLog(logContainer, "info", { errorMsg: `총 ${ev.total}권 처리 시작` });
 
+        } else if (ev.type === "step") {
+          if (stepEl) stepEl.textContent = ev.step || "";
+
         } else if (ev.type === "progress") {
           setProgress(progressBar, progressText, progressPct, ev.done, ev.total);
           currentEl.textContent = ev.current ? `처리 중: ${ev.current}` : "";
+          if (stepEl) stepEl.textContent = "";
 
         } else if (ev.type === "log") {
           if (ev.status === "success") {
@@ -699,6 +711,7 @@
         } else if (ev.type === "cancelled") {
           isDone = true;
           currentEl.textContent = "";
+          if (stepEl) stepEl.textContent = "";
           appendLog(logContainer, "info", {
             errorMsg: `중단됨 — ${ev.done}건 처리됨 (전체 ${ev.total}건 중)`
           });
@@ -711,6 +724,7 @@
           isDone = true;
           setProgress(progressBar, progressText, progressPct, ev.total, ev.total);
           currentEl.textContent = "";
+          if (stepEl) stepEl.textContent = "";
           appendLog(logContainer, "info", {
             errorMsg: `완료 — 성공: ${ev.done}건, 오류: ${ev.errors}건, 합계: ${ev.total}건`
           });
@@ -752,6 +766,7 @@
     progressText: document.getElementById("pipelineProgressText"),
     progressPct:  document.getElementById("pipelineProgressPct"),
     currentEl:    document.getElementById("pipelineCurrent"),
+    stepEl:       document.getElementById("pipelineStep"),
     logWrap:      document.getElementById("pipelineLogWrap"),
     logContainer: document.getElementById("pipelineLog"),
     startLabel:   "파이프라인",

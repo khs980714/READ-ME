@@ -98,6 +98,14 @@ async function handleSend() {
   scrollBottom();
 }
 
+// ── 오류 코드별 메시지 ────────────────────────────────────
+function httpErrorMessage(status) {
+  if (status === 429) return "요청이 너무 많습니다. 잠시 후 다시 시도해주세요. (Rate Limit)";
+  if (status === 504 || status === 502) return "AI 서버 응답 시간이 초과되었습니다. 잠시 후 다시 시도해주세요. (Timeout)";
+  if (status >= 500) return "서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
+  return "오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
+}
+
 // ── 일반 모드 (JSON 응답) ─────────────────────────────────
 async function handleNormalSend(content) {
   const typingEl = appendTyping();
@@ -113,7 +121,7 @@ async function handleNormalSend(content) {
     typingEl.remove();
 
     if (!res.ok) {
-      appendMessage({ role: "assistant", content: data.error || "오류가 발생했습니다." });
+      appendMessage({ role: "assistant", content: data.error || httpErrorMessage(res.status) });
     } else {
       appendMessage({
         role: "assistant",
@@ -124,7 +132,7 @@ async function handleNormalSend(content) {
     }
   } catch {
     typingEl.remove();
-    appendMessage({ role: "assistant", content: "서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요." });
+    appendMessage({ role: "assistant", content: "서버에 연결할 수 없습니다. 네트워크 상태를 확인해주세요." });
   }
 }
 
@@ -145,7 +153,8 @@ async function handleStreamSend(content) {
     });
 
     if (!res.ok) {
-      bubble.textContent = "오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
+      bubble.classList.remove("streaming-waiting");
+      bubble.textContent = httpErrorMessage(res.status);
       return;
     }
 
@@ -190,20 +199,21 @@ async function handleStreamSend(content) {
               body.insertBefore(badge, bubble);
             }
             if (event.recommendations?.length) {
-              body.appendChild(renderRecommendations(event.recommendations));
+              body.appendChild(renderRecommendations(event.recommendations, qtype));
               scrollBottom();
             }
 
           } else if (event.type === "error") {
             bubble.classList.remove("streaming-waiting");
-            bubble.textContent = event.content || "오류가 발생했습니다.";
+            // content에 구체적인 오류 메시지가 없으면 기본 안내 표시
+            bubble.textContent = event.content || "오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
           }
         }
       }
     }
   } catch {
     bubble.classList.remove("streaming-waiting");
-    bubble.textContent = "서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.";
+    bubble.textContent = "서버에 연결할 수 없습니다. 네트워크 상태를 확인해주세요.";
   }
 }
 
@@ -259,7 +269,7 @@ function appendMessage(msg) {
   body.appendChild(bubble);
 
   if (msg.role === "assistant" && msg.recommendations?.length) {
-    body.appendChild(renderRecommendations(msg.recommendations));
+    body.appendChild(renderRecommendations(msg.recommendations, msg.question_type));
   }
 
   wrap.appendChild(avatar);
@@ -294,7 +304,10 @@ function appendTyping() {
 }
 
 // ── 추천 카드 ────────────────────────────────────────────
-function renderRecommendations(recs) {
+// 단계별 큐레이션 유형은 전체 카드를 바로 노출합니다.
+const FULL_VISIBLE_TYPES = new Set(["goal_oriented", "career_certification"]);
+
+function renderRecommendations(recs, qtype) {
   const section = document.createElement("div");
   section.className = "rec-section";
 
@@ -306,12 +319,13 @@ function renderRecommendations(recs) {
   const cardsWrap = document.createElement("div");
   cardsWrap.className = "rec-cards";
 
-  const visible = recs.slice(0, VISIBLE_CARDS);
+  const showAll = FULL_VISIBLE_TYPES.has(qtype);
+  const visible = showAll ? recs : recs.slice(0, VISIBLE_CARDS);
 
   visible.forEach((rec) => cardsWrap.appendChild(makeCard(rec)));
   section.appendChild(cardsWrap);
 
-  if (recs.length > VISIBLE_CARDS) {
+  if (!showAll && recs.length > VISIBLE_CARDS) {
     const moreBtn = document.createElement("button");
     moreBtn.className = "btn-more";
     moreBtn.textContent = `더보기 (총 ${recs.length}권)`;
@@ -343,6 +357,12 @@ function makeCard(rec) {
     </svg>`;
     thumb.appendChild(ph);
   }
+  if (rec.rank) {
+    const rankBadge = document.createElement("span");
+    rankBadge.className = "rec-card-rank";
+    rankBadge.textContent = `#${rec.rank}`;
+    thumb.appendChild(rankBadge);
+  }
 
   const info = document.createElement("div");
   info.className = "rec-card-info";
@@ -362,6 +382,12 @@ function makeCard(rec) {
     badge.className = `badge badge--${rec.difficulty}`;
     badge.textContent = rec.difficulty;
     meta.appendChild(badge);
+  }
+  if (rec.score != null) {
+    const scoreEl = document.createElement("span");
+    scoreEl.className = "rec-card-score";
+    scoreEl.textContent = `유사도 ${Math.round(rec.score * 100)}%`;
+    meta.appendChild(scoreEl);
   }
 
   info.appendChild(title);

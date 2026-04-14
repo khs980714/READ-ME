@@ -65,7 +65,63 @@
 {% if book.toc %}
 <section class="detail-desc">
   <h2 class="section-title">목차</h2>
-  <div class="desc-body">{{ book.toc|linebreaks }}</div>
+  <div class="toc-body" id="tocBody" data-raw="{{ book.toc }}">{{ book.toc|linebreaks }}</div>
 </section>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if book.toc %}
+<script>
+(function () {
+  const container = document.getElementById("tocBody");
+  if (!container) return;
+
+  const raw = container.dataset.raw || "";
+  const lines = raw.split("\n");
+
+  // 각 줄의 선행 공백 수로 depth를 결정합니다.
+  function leadingSpaces(str) {
+    let n = 0;
+    for (let i = 0; i < str.length; i++) {
+      if (str[i] === " ") n++;
+      else if (str[i] === "\t") n += 4;
+      else break;
+    }
+    return n;
+  }
+
+  // 챕터/파트 헤더 패턴 (예: "Chapter 1", "1장", "PART 1", "제1장")
+  const headerRe = /^(chapter|part|챕터|파트|제?\d+\s*장|\d+\.\s)/i;
+
+  const ul = document.createElement("ul");
+  ul.className = "toc-list";
+
+  let minIndent = Infinity;
+  const parsedLines = lines.map(l => {
+    const trimmed = l.trimEnd();
+    const spaces = leadingSpaces(trimmed);
+    if (trimmed.trim()) minIndent = Math.min(minIndent, spaces);
+    return { text: trimmed.trim(), indent: spaces };
+  }).filter(l => l.text);
+
+  if (minIndent === Infinity) minIndent = 0;
+
+  // depth 단계를 2칸 이상 들여쓰기 기준으로 구분
+  parsedLines.forEach(({ text, indent }) => {
+    const depth = Math.round((indent - minIndent) / 2);
+    const li = document.createElement("li");
+    li.className = `toc-item toc-depth-${Math.min(depth, 3)}`;
+    if (depth === 0 && headerRe.test(text)) {
+      li.classList.add("toc-header");
+    }
+    li.textContent = text;
+    ul.appendChild(li);
+  });
+
+  container.innerHTML = "";
+  container.appendChild(ul);
+})();
+</script>
 {% endif %}
 {% endblock %}

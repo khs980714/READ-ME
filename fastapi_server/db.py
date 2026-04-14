@@ -19,8 +19,11 @@ from pgvector.psycopg2 import register_vector
 from config import settings
 
 # ── 커넥션 풀 ───────────────────────────────────────────────────
-# minconn=2: 항상 대기 중인 커넥션 유지 (첫 요청 지연 최소화)
-# maxconn=10: 동시 요청 최대치 (uvicorn worker 수와 맞춤)
+# minconn=3: 항상 대기 중인 커넥션 유지 (첫 요청 지연 최소화)
+# maxconn=15: locust 부하 테스트 기반 조정 (동시 요청 최대치)
+#   - /chat/message: 평균 ~2 req/s, 피크 시 동시 처리 고려
+#   - /chat/message/stream: heavy 시나리오 ~1.2 req/s
+#   - uvicorn worker 기본 1개 기준, 스레드 풀 여유분 포함
 _pool: psycopg2.pool.ThreadedConnectionPool | None = None
 
 
@@ -28,8 +31,8 @@ def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
     global _pool
     if _pool is None:
         _pool = psycopg2.pool.ThreadedConnectionPool(
-            minconn=2,
-            maxconn=10,
+            minconn=3,
+            maxconn=15,
             dsn=settings.DATABASE_URL,
         )
     return _pool
@@ -84,7 +87,7 @@ def _rows_to_dicts(rows) -> list[dict]:
             "thumbnail_url":   r[3],
             "score":           float(r[4]),
             "publication_year": r[5],
-            "book_code":       r[6] or str(r[0]),
+            "book_code":       r[6] or f"D-{r[0]:03d}",
         }
         for r in rows
     ]

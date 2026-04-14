@@ -19,6 +19,7 @@
 import json
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from queue import Empty, Queue
 
 from django.http import JsonResponse, StreamingHttpResponse
@@ -75,39 +76,47 @@ def _unregister_cancel(job_id: str):
 
 # ── 페이지 ────────────────────────────────────────────────────
 
-@_staff_required
-def pipeline_page(request):
+_PIPELINE_STATS_CACHE_KEY = "pipeline:stats"
+_PIPELINE_STATS_CACHE_TTL = 60  # 1분 캐시 (파이프라인 실행 후 캐시 무효화)
+
+
+def _get_pipeline_stats() -> dict:
+    """파이프라인 통계 계산 — 결과를 1분 캐시합니다."""
+    from django.core.cache import cache
     from django.db.models import Count
     from books.models import Book, BookEmbedding, BookList
-    total_books = Book.objects.filter(is_active=True).count()
-    pending = BookList.objects.filter(description="").count()
+
+    stats = cache.get(_PIPELINE_STATS_CACHE_KEY)
+    if stats is not None:
+        return stats
+
     embedded_ids = BookEmbedding.objects.values_list("book_list_id", flat=True)
-    missing_embed = (
-        BookList.objects
-        .exclude(description="")
-        .exclude(pk__in=embedded_ids)
-        .count()
-    )
-    # description 있음 + difficulty 미분류
-    unclassified = BookList.objects.exclude(description="").filter(difficulty="").count()
-    # publication_year 미등록
-    missing_year = BookList.objects.filter(publication_year__isnull=True).count()
-    # description 있음 + 카테고리 없음
-    missing_category = (
-        BookList.objects
-        .exclude(description="")
-        .annotate(cat_count=Count("categories"))
-        .filter(cat_count=0)
-        .count()
-    )
-    return render(request, "data_pipeline/index.html", {
-        "total_books":      total_books,
-        "pending":          pending,
-        "missing_embed":    missing_embed,
-        "unclassified":     unclassified,
-        "missing_year":     missing_year,
-        "missing_category": missing_category,
-    })
+    stats = {
+        "total_books": Book.objects.filter(is_active=True).count(),
+        "pending": BookList.objects.filter(description="").count(),
+        "missing_embed": (
+            BookList.objects
+            .exclude(description="")
+            .exclude(pk__in=embedded_ids)
+            .count()
+        ),
+        "unclassified": BookList.objects.exclude(description="").filter(difficulty="").count(),
+        "missing_year": BookList.objects.filter(publication_year__isnull=True).count(),
+        "missing_category": (
+            BookList.objects
+            .exclude(description="")
+            .annotate(cat_count=Count("categories"))
+            .filter(cat_count=0)
+            .count()
+        ),
+    }
+    cache.set(_PIPELINE_STATS_CACHE_KEY, stats, _PIPELINE_STATS_CACHE_TTL)
+    return stats
+
+
+@_staff_required
+def pipeline_page(request):
+    return render(request, "data_pipeline/index.html", _get_pipeline_stats())
 
 
 # ── 작업 중단 ─────────────────────────────────────────────────
@@ -150,12 +159,12 @@ def run_pipeline(request):
     with _jobs_lock:
         _jobs[job_id] = q
 
+    _running.set()
     threading.Thread(target=_pipeline_worker, args=(job_id, q, cancel_event), daemon=True).start()
     return JsonResponse({"job_id": job_id})
 
 
 def _pipeline_worker(job_id: str, q: Queue, cancel_event: threading.Event):
-    _running.set()
     try:
         from books.models import BookList
         from books.services import run_booklist_pipeline
@@ -169,26 +178,29 @@ def _pipeline_worker(job_id: str, q: Queue, cancel_event: threading.Event):
         total = len(book_lists)
         q.put({"type": "start", "total": total})
 
+        done_lock = threading.Lock()
         done = errors = 0
-        for bl in book_lists:
-            if cancel_event.is_set():
-                q.put({"type": "cancelled", "done": done, "total": total})
-                break
 
+        def _process_one(bl):
+            nonlocal done, errors
+            if cancel_event.is_set():
+                return
             title = bl.full_title
             book_list_id = bl.pk
-            q.put({"type": "progress", "done": done, "total": total,
-                   "current": title})
+            q.put({"type": "progress", "done": done, "total": total, "current": title})
 
             log_messages = []
-            def progress_cb(msg):
+            def progress_cb(msg, _title=title):
                 log_messages.append(msg)
+                # 단계 메시지를 step 이벤트로 실시간 전송
+                q.put({"type": "step", "title": _title, "step": msg})
 
             try:
                 candidates = run_booklist_pipeline(
                     bl, progress_callback=progress_cb, return_candidates=True
                 )
-                done += 1
+                with done_lock:
+                    done += 1
                 q.put({"type": "log", "status": "success",
                        "title": title, "messages": log_messages})
                 # 알라딘 후보가 2개 이상이면 도서 선택 이벤트 emit
@@ -200,9 +212,20 @@ def _pipeline_worker(job_id: str, q: Queue, cancel_event: threading.Event):
                         "candidates": candidates,
                     })
             except Exception as e:
-                errors += 1
+                with done_lock:
+                    errors += 1
                 q.put({"type": "log", "status": "error",
                        "title": title, "error": str(e), "messages": log_messages})
+
+        # API Rate Limit을 고려해 최대 3개 병렬 처리
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = {executor.submit(_process_one, bl): bl for bl in book_lists}
+            for future in as_completed(futures):
+                future.result()  # 예외 재전파 방지 (내부에서 처리됨)
+                if cancel_event.is_set():
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    q.put({"type": "cancelled", "done": done, "total": total})
+                    return
 
         if not cancel_event.is_set():
             q.put({"type": "complete", "done": done, "errors": errors, "total": total})
@@ -212,6 +235,9 @@ def _pipeline_worker(job_id: str, q: Queue, cancel_event: threading.Event):
         q.put(None)
         _running.clear()
         _unregister_cancel(job_id)
+        # 파이프라인 완료 후 통계 캐시 무효화
+        from django.core.cache import cache
+        cache.delete(_PIPELINE_STATS_CACHE_KEY)
 
 
 def pipeline_stream(request, job_id: str):
@@ -245,12 +271,12 @@ def run_embed_missing(request):
     with _embed_jobs_lock:
         _embed_jobs[job_id] = q
 
+    _embed_running.set()
     threading.Thread(target=_embed_worker, args=(job_id, q, targets, cancel_event), daemon=True).start()
     return JsonResponse({"job_id": job_id})
 
 
 def _embed_worker(job_id: str, q: Queue, targets: list, cancel_event: threading.Event):
-    _embed_running.set()
     try:
         from books.services import refresh_embedding
 
@@ -315,12 +341,12 @@ def run_classify(request):
     with _classify_jobs_lock:
         _classify_jobs[job_id] = q
 
+    _classify_running.set()
     threading.Thread(target=_classify_worker, args=(job_id, q, targets, cancel_event), daemon=True).start()
     return JsonResponse({"job_id": job_id})
 
 
 def _classify_worker(job_id: str, q: Queue, targets: list, cancel_event: threading.Event):
-    _classify_running.set()
     try:
         from books.services import classify_difficulty
 
@@ -389,12 +415,12 @@ def run_extract_year(request):
     with _year_jobs_lock:
         _year_jobs[job_id] = q
 
+    _year_running.set()
     threading.Thread(target=_year_worker, args=(job_id, q, targets, cancel_event), daemon=True).start()
     return JsonResponse({"job_id": job_id})
 
 
 def _year_worker(job_id: str, q: Queue, targets: list, cancel_event: threading.Event):
-    _year_running.set()
     try:
         from books.services import extract_publication_year
 
@@ -466,12 +492,12 @@ def run_classify_category(request):
     with _category_jobs_lock:
         _category_jobs[job_id] = q
 
+    _category_running.set()
     threading.Thread(target=_category_worker, args=(job_id, q, targets, cancel_event), daemon=True).start()
     return JsonResponse({"job_id": job_id})
 
 
 def _category_worker(job_id: str, q: Queue, targets: list, cancel_event: threading.Event):
-    _category_running.set()
     try:
         from books.models import BookListCategory, Category
         from books.services import classify_category
