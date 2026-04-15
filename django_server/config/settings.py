@@ -109,11 +109,40 @@ USE_TZ = True
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
-# ── Media files ───────────────────────────────────────────────
+# ── Media / Storage ───────────────────────────────────────────
+# 로컬: FileSystemStorage (Docker 볼륨)
+# 배포: R2_BUCKET_NAME 환경변수 설정 시 Cloudflare R2 (S3 호환) 사용
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+_R2_BUCKET = os.getenv("R2_BUCKET_NAME", "")
+
+STORAGES = {
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+}
+
+if _R2_BUCKET:
+    _r2_custom_domain = os.getenv("R2_CUSTOM_DOMAIN", "")
+    STORAGES["default"] = {
+        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+        "OPTIONS": {
+            "bucket_name": _R2_BUCKET,
+            "endpoint_url": os.getenv("R2_ENDPOINT_URL", ""),
+            "access_key": os.getenv("R2_ACCESS_KEY_ID", ""),
+            "secret_key": os.getenv("R2_SECRET_ACCESS_KEY", ""),
+            "custom_domain": _r2_custom_domain or None,
+            "default_acl": "public-read",
+            "file_overwrite": False,
+        },
+    }
+    if _r2_custom_domain:
+        MEDIA_URL = f"https://{_r2_custom_domain}/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

@@ -43,6 +43,7 @@ services:
       - ./django_server:/app
       - ./data.csv:/app/data.csv:ro
       - static_vol:/app/staticfiles
+      - media_vol:/app/media
     depends_on:
       db:
         condition: service_healthy
@@ -53,3 +54,4 @@ services:
 volumes:
   pg_data:
   static_vol:
+  media_vol:
