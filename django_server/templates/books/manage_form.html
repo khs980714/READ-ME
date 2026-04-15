@@ -200,6 +200,13 @@
         </div>
 
         <div class="form-group">
+          <label class="form-label" for="subtitle">부제</label>
+          <input class="form-input" type="text" id="subtitle" name="subtitle"
+                 placeholder="예: 기초부터 실무까지"
+                 value="{{ form_data.subtitle|default:'' }}">
+        </div>
+
+        <div class="form-group">
           <label class="form-label" for="edition">판차</label>
           <input class="form-input" type="text" id="edition" name="edition"
                  placeholder="예: (개정2판), (심화편)"

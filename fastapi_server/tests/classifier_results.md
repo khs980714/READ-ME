@@ -1,8 +1,8 @@
 # 질문 분류기 테스트 결과
 
-실행 일시: 2026-04-14 18:52:39  
+실행 일시: 2026-04-14 19:01:32  
 
-전체 정확도: **281/300 (93.7%)**
+전체 정확도: **296/300 (98.7%)**
 
 
 ## 유형별 정확도
@@ -10,10 +10,10 @@
 | 유형 | 분류 키 | 정답 | 전체 | 정확도 |
 |---|---|---|---|---|
 | 도서 조회 | `keyword_search` | 50 | 50 | 100.0% |
-| 특정 기술 추천 | `specific_search` | 50 | 50 | 100.0% |
-| 진로·목적 기반 | `goal_oriented` | 49 | 50 | 98.0% |
-| 자격증·취업 | `career_certification` | 35 | 50 | 70.0% |
-| 수준 기반 | `level_based` | 47 | 50 | 94.0% |
+| 특정 기술 추천 | `specific_search` | 49 | 50 | 98.0% |
+| 진로·목적 기반 | `goal_oriented` | 48 | 50 | 96.0% |
+| 자격증·취업 | `career_certification` | 49 | 50 | 98.0% |
+| 수준 기반 | `level_based` | 50 | 50 | 100.0% |
 | 범위 외 | `out_of_scope` | 50 | 50 | 100.0% |
 
 ## 전체 테스트 케이스
@@ -92,7 +92,7 @@
 | 62 | 시스템 설계 책 뭐가 좋아? | `specific_search` | `specific_search` | ✅ |
 | 63 | 타입스크립트 추천 도서 알려줘 | `specific_search` | `specific_search` | ✅ |
 | 64 | Vue.js 배우기 좋은 책 추천해줘 | `specific_search` | `specific_search` | ✅ |
-| 65 | 네트워크 기초 공부하려면 어떤 책이 좋을까? | `specific_search` | `specific_search` | ✅ |
+| 65 | 네트워크 기초 공부하려면 어떤 책이 좋을까? | `specific_search` | `level_based` | ❌ |
 | 66 | 데이터베이스 설계 책 추천해줘 | `specific_search` | `specific_search` | ✅ |
 | 67 | 빅데이터 분석 책 알려줘 | `specific_search` | `specific_search` | ✅ |
 | 68 | 하둡 공부할 책 추천해줘 | `specific_search` | `specific_search` | ✅ |
@@ -153,7 +153,7 @@
 | 118 | IT 기획자가 되고 싶어 | `goal_oriented` | `goal_oriented` | ✅ |
 | 119 | 데이터베이스 관리자 DBA가 되려면 어떤 공부를 해야 해? | `goal_oriented` | `goal_oriented` | ✅ |
 | 120 | 인공지능 스타트업을 창업하고 싶은데 어떤 지식이 필요해? | `goal_oriented` | `goal_oriented` | ✅ |
-| 121 | 개발자에서 시니어로 성장하고 싶어 | `goal_oriented` | `level_based` | ❌ |
+| 121 | 개발자에서 시니어로 성장하고 싶어 | `goal_oriented` | `goal_oriented` | ✅ |
 | 122 | 파이썬으로 자동화 업무를 하고 싶어 | `goal_oriented` | `goal_oriented` | ✅ |
 | 123 | 빅데이터 전문가로 성장하고 싶어 | `goal_oriented` | `goal_oriented` | ✅ |
 | 124 | IT 분야로 커리어 전환을 준비하고 있어 | `goal_oriented` | `goal_oriented` | ✅ |
@@ -172,8 +172,8 @@
 | 137 | 마케터인데 데이터 분석을 배워 업무에 쓰고 싶어 | `goal_oriented` | `goal_oriented` | ✅ |
 | 138 | 기획자인데 개발 지식을 키워 개발팀과 소통하고 싶어 | `goal_oriented` | `goal_oriented` | ✅ |
 | 139 | 컴퓨터공학과 졸업 예정인데 개발자 취업 준비를 어떻게 해야 해? | `goal_oriented` | `goal_oriented` | ✅ |
-| 140 | 주니어 백엔드 개발자인데 시니어가 되기 위한 로드맵이 필요해 | `goal_oriented` | `goal_oriented` | ✅ |
-| 141 | AWS 자격증 취득 후 클라우드 전문가가 되고 싶어 | `goal_oriented` | `goal_oriented` | ✅ |
+| 140 | 주니어 백엔드 개발자인데 시니어가 되기 위한 로드맵이 필요해 | `goal_oriented` | `level_based` | ❌ |
+| 141 | AWS 자격증 취득 후 클라우드 전문가가 되고 싶어 | `goal_oriented` | `career_certification` | ❌ |
 | 142 | 게임 개발자가 되고 싶어 | `goal_oriented` | `goal_oriented` | ✅ |
 | 143 | 임베디드 개발자가 되고 싶어 | `goal_oriented` | `goal_oriented` | ✅ |
 | 144 | IT 영업직에서 기술 영업으로 전향하고 싶어 | `goal_oriented` | `goal_oriented` | ✅ |
@@ -195,40 +195,40 @@
 | 155 | 빅데이터분석기사 실기 준비 도서 알려줘 | `career_certification` | `career_certification` | ✅ |
 | 156 | 정보보안기사 시험 대비 책 추천해줘 | `career_certification` | `career_certification` | ✅ |
 | 157 | AWS 자격증 준비할 책 알려줘 | `career_certification` | `career_certification` | ✅ |
-| 158 | 코딩 테스트 통과를 위한 알고리즘 책 추천해줘 | `career_certification` | `goal_oriented` | ❌ |
-| 159 | 취업 코딩 테스트 준비 책 알려줘 | `career_certification` | `goal_oriented` | ❌ |
+| 158 | 코딩 테스트 통과를 위한 알고리즘 책 추천해줘 | `career_certification` | `career_certification` | ✅ |
+| 159 | 취업 코딩 테스트 준비 책 알려줘 | `career_certification` | `career_certification` | ✅ |
 | 160 | 포트폴리오 프로젝트 아이디어 얻을 책 추천해줘 | `career_certification` | `career_certification` | ✅ |
-| 161 | 네이버 카카오 코딩 테스트 대비 책 뭐가 좋아? | `career_certification` | `goal_oriented` | ❌ |
+| 161 | 네이버 카카오 코딩 테스트 대비 책 뭐가 좋아? | `career_certification` | `career_certification` | ✅ |
 | 162 | AWS SAA 자격증 취득하려고 해 | `career_certification` | `career_certification` | ✅ |
 | 163 | 정보처리기사 2026년 합격하고 싶어 | `career_certification` | `career_certification` | ✅ |
 | 164 | 빅데이터분석기사 필기 수험서 추천해줘 | `career_certification` | `career_certification` | ✅ |
 | 165 | SQLD 기출문제 포함된 책 알려줘 | `career_certification` | `career_certification` | ✅ |
-| 166 | IT 취업 면접 대비 책 추천해줘 | `career_certification` | `goal_oriented` | ❌ |
+| 166 | IT 취업 면접 대비 책 추천해줘 | `career_certification` | `career_certification` | ✅ |
 | 167 | 개발자 포트폴리오 만들기 위한 책 알려줘 | `career_certification` | `career_certification` | ✅ |
 | 168 | 정보처리기사 단기 합격 수험서 추천해줘 | `career_certification` | `career_certification` | ✅ |
-| 169 | 코딩 테스트 파이썬으로 준비할 책 추천해줘 | `career_certification` | `goal_oriented` | ❌ |
+| 169 | 코딩 테스트 파이썬으로 준비할 책 추천해줘 | `career_certification` | `career_certification` | ✅ |
 | 170 | AI 비즈니스 TEST 준비하려고 해 | `career_certification` | `career_certification` | ✅ |
 | 171 | 컴퓨터 활용능력 1급 수험서 추천해줘 | `career_certification` | `career_certification` | ✅ |
 | 172 | 정보처리산업기사 올인원 수험서 알려줘 | `career_certification` | `career_certification` | ✅ |
 | 173 | IT 취업 준비를 위한 컴퓨터 과학 책 추천해줘 | `career_certification` | `goal_oriented` | ❌ |
-| 174 | 코딩 테스트 자바로 준비할 책 알려줘 | `career_certification` | `goal_oriented` | ❌ |
-| 175 | Do it 알고리즘 코딩 테스트 같은 책 추천해줘 | `career_certification` | `specific_search` | ❌ |
+| 174 | 코딩 테스트 자바로 준비할 책 알려줘 | `career_certification` | `career_certification` | ✅ |
+| 175 | Do it 알고리즘 코딩 테스트 같은 책 추천해줘 | `career_certification` | `career_certification` | ✅ |
 | 176 | SQL 자격검정 실전문제 같은 수험서 알려줘 | `career_certification` | `career_certification` | ✅ |
 | 177 | 정보보안기사 핵심 요약 노트 추천해줘 | `career_certification` | `career_certification` | ✅ |
-| 178 | 프로그래머스 코딩 테스트 문제풀이 책 알려줘 | `career_certification` | `specific_search` | ❌ |
-| 179 | 취업 준비하면서 자격증도 같이 따고 싶어 어떤 책이 좋아? | `career_certification` | `goal_oriented` | ❌ |
+| 178 | 프로그래머스 코딩 테스트 문제풀이 책 알려줘 | `career_certification` | `career_certification` | ✅ |
+| 179 | 취업 준비하면서 자격증도 같이 따고 싶어 어떤 책이 좋아? | `career_certification` | `career_certification` | ✅ |
 | 180 | SQLD 2026 최신판 수험서 추천해줘 | `career_certification` | `career_certification` | ✅ |
-| 181 | IT 면접에 나오는 컴퓨터 과학 기초 정리된 책 알려줘 | `career_certification` | `goal_oriented` | ❌ |
+| 181 | IT 면접에 나오는 컴퓨터 과학 기초 정리된 책 알려줘 | `career_certification` | `career_certification` | ✅ |
 | 182 | 기사 시험 일정에 맞춰 공부할 수 있는 수험서 추천해줘 | `career_certification` | `career_certification` | ✅ |
-| 183 | 개발자 취업 포트폴리오 완성에 도움 되는 프로젝트 책 알려줘 | `career_certification` | `goal_oriented` | ❌ |
+| 183 | 개발자 취업 포트폴리오 완성에 도움 되는 프로젝트 책 알려줘 | `career_certification` | `career_certification` | ✅ |
 | 184 | 정보처리기사 실기 기출문제집 추천해줘 | `career_certification` | `career_certification` | ✅ |
 | 185 | ADsP 2026 준비할 책 알려줘 | `career_certification` | `career_certification` | ✅ |
 | 186 | AWS 공인 솔루션스 아키텍트 자격증 준비 책 추천해줘 | `career_certification` | `career_certification` | ✅ |
 | 187 | 정보보안 자격증 준비하려는데 어떤 책이 좋아? | `career_certification` | `career_certification` | ✅ |
-| 188 | 코딩 테스트 완전 정복하고 싶어 어떤 책 읽어야 해? | `career_certification` | `goal_oriented` | ❌ |
+| 188 | 코딩 테스트 완전 정복하고 싶어 어떤 책 읽어야 해? | `career_certification` | `career_certification` | ✅ |
 | 189 | TOPCIT 준비할 책 추천해줘 | `career_certification` | `career_certification` | ✅ |
 | 190 | SQL 개발자 자격증 공부할 책 알려줘 | `career_certification` | `career_certification` | ✅ |
-| 191 | 자격증 따고 취업하고 싶어 어떤 자격증 수험서가 좋아? | `career_certification` | `goal_oriented` | ❌ |
+| 191 | 자격증 따고 취업하고 싶어 어떤 자격증 수험서가 좋아? | `career_certification` | `career_certification` | ✅ |
 | 192 | IT 국가기술자격증 준비 책 추천해줘 | `career_certification` | `career_certification` | ✅ |
 | 193 | 오라클 자격증 준비 도서 알려줘 | `career_certification` | `career_certification` | ✅ |
 | 194 | 데이터 분석 자격증 대비 책 추천해줘 | `career_certification` | `career_certification` | ✅ |
@@ -237,7 +237,7 @@
 | 197 | 자격증 시험에 나오는 범위 다 정리된 책 추천해줘 | `career_certification` | `career_certification` | ✅ |
 | 198 | 이기적 정보처리기사 같은 스타일의 책 추천해줘 | `career_certification` | `career_certification` | ✅ |
 | 199 | 시나공 시리즈 정보처리기사 책 알려줘 | `career_certification` | `career_certification` | ✅ |
-| 200 | 취업 코딩 테스트 통과하려면 어떤 알고리즘 책이 좋아? | `career_certification` | `goal_oriented` | ❌ |
+| 200 | 취업 코딩 테스트 통과하려면 어떤 알고리즘 책이 좋아? | `career_certification` | `career_certification` | ✅ |
 
 ### 수준 기반 (`level_based`)
 
@@ -252,8 +252,8 @@
 | 207 | 리액트 초급 도서 알려줘 | `level_based` | `level_based` | ✅ |
 | 208 | SQL 입문 책 추천해줘 | `level_based` | `level_based` | ✅ |
 | 209 | 스프링 심화 과정 책 추천해줘 | `level_based` | `level_based` | ✅ |
-| 210 | 네트워크 기초부터 배우는 책 알려줘 | `level_based` | `specific_search` | ❌ |
-| 211 | 이미 개발자인데 아키텍처 더 깊게 공부하고 싶어 | `level_based` | `goal_oriented` | ❌ |
+| 210 | 네트워크 기초부터 배우는 책 알려줘 | `level_based` | `level_based` | ✅ |
+| 211 | 이미 개발자인데 아키텍처 더 깊게 공부하고 싶어 | `level_based` | `level_based` | ✅ |
 | 212 | 데이터베이스 중급 도서 추천해줘 | `level_based` | `level_based` | ✅ |
 | 213 | 클라우드 고급자를 위한 책 알려줘 | `level_based` | `level_based` | ✅ |
 | 214 | 파이썬을 조금 알지만 더 심화 학습하고 싶어 | `level_based` | `level_based` | ✅ |
@@ -277,7 +277,7 @@
 | 232 | 네트워크 중급자용 책 알려줘 | `level_based` | `level_based` | ✅ |
 | 233 | 자료구조 입문자를 위한 책 추천해줘 | `level_based` | `level_based` | ✅ |
 | 234 | 마이크로서비스 고급 도서 알려줘 | `level_based` | `level_based` | ✅ |
-| 235 | 이미 SQL 쓸 줄 알지만 더 잘 쓰고 싶어 | `level_based` | `specific_search` | ❌ |
+| 235 | 이미 SQL 쓸 줄 알지만 더 잘 쓰고 싶어 | `level_based` | `level_based` | ✅ |
 | 236 | 초급 개발자가 읽으면 좋은 책 추천해줘 | `level_based` | `level_based` | ✅ |
 | 237 | 리눅스를 처음 배우는 사람한테 맞는 책 알려줘 | `level_based` | `level_based` | ✅ |
 | 238 | 하둡 고급 기술 책 추천해줘 | `level_based` | `level_based` | ✅ |

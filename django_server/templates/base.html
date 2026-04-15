@@ -143,6 +143,24 @@
   </script>
   {% endif %}
 
+  <!-- ── 맨 위로 버튼 ────────────────────────────────────────── -->
+  <button id="scrollTopBtn" class="scroll-top-btn" aria-label="맨 위로">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="18 15 12 9 6 15"/>
+    </svg>
+  </button>
+  <script>
+    (function () {
+      const btn = document.getElementById("scrollTopBtn");
+      window.addEventListener("scroll", function () {
+        btn.classList.toggle("scroll-top-btn--visible", window.scrollY > 300);
+      }, { passive: true });
+      btn.addEventListener("click", function () {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+    })();
+  </script>
+
   {% block extra_js %}{% endblock %}
 </body>
 </html>
