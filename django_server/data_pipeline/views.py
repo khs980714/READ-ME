@@ -14,6 +14,13 @@
 - GET  /pipeline/category/stream/<job_id>/     → 카테고리 분류 SSE 스트림
 - POST /pipeline/candidates/search/            → 알라딘 도서 후보 검색 (AJAX)
 - POST /pipeline/candidates/apply/             → 선택 후보 도서 정보 적용 (AJAX)
+- GET  /pipeline/thumbnails/scan/              → 미사용 썸네일 파일 목록 반환 (AJAX)
+- POST /pipeline/thumbnails/clean/             → 미사용 썸네일 파일 일괄 삭제 (AJAX)
+- POST /pipeline/yes24/run/                    → YES24 후보 수집 시작 (job_id 반환)
+- GET  /pipeline/yes24/stream/<job_id>/        → YES24 후보 수집 SSE 스트림
+- GET  /pipeline/yes24/candidates/             → 저장된 YES24 후보 목록 반환 (AJAX)
+- POST /pipeline/yes24/apply/                  → 선택 후보 상세 수집 후 DB 덮어쓰기 (AJAX)
+- POST /pipeline/yes24/dismiss/                → 해당 book_list 후보 제거 (AJAX)
 """
 
 import json
@@ -91,6 +98,7 @@ def _get_pipeline_stats() -> dict:
         return stats
 
     embedded_ids = BookEmbedding.objects.values_list("book_list_id", flat=True)
+    from books.models import YES24Candidate
     stats = {
         "total_books": Book.objects.filter(is_active=True).count(),
         "pending": BookList.objects.filter(description="").count(),
@@ -109,6 +117,7 @@ def _get_pipeline_stats() -> dict:
             .filter(cat_count=0)
             .count()
         ),
+        "yes24_pending": YES24Candidate.objects.values("book_list").distinct().count(),
     }
     cache.set(_PIPELINE_STATS_CACHE_KEY, stats, _PIPELINE_STATS_CACHE_TTL)
     return stats
@@ -319,7 +328,7 @@ def embed_stream(request, job_id: str):
 @_staff_required
 @require_POST
 def run_classify(request):
-    """description 있음 + difficulty 미분류 도서를 SSE 방식으로 일괄 분류."""
+    """description 있는 전체 도서를 SSE 방식으로 일괄 분류 (DB 저장 없이 결과 반환)."""
     if _classify_running.is_set():
         if not _parse_force(request):
             return JsonResponse({"error": "이미 난이도 분류가 진행 중입니다."}, status=409)
@@ -329,7 +338,6 @@ def run_classify(request):
     targets = list(
         BookList.objects
         .exclude(description="")
-        .filter(difficulty="")
         .order_by("title")
     )
     if not targets:
@@ -347,6 +355,7 @@ def run_classify(request):
 
 
 def _classify_worker(job_id: str, q: Queue, targets: list, cancel_event: threading.Event):
+    """분류 결과를 DB에 바로 저장하지 않고 preview 이벤트로 반환한다."""
     try:
         from books.services import classify_difficulty
 
@@ -354,17 +363,23 @@ def _classify_worker(job_id: str, q: Queue, targets: list, cancel_event: threadi
         q.put({"type": "start", "total": total})
 
         done = errors = 0
+        results = []
         for bl in targets:
             if cancel_event.is_set():
                 q.put({"type": "cancelled", "done": done, "total": total})
                 break
 
             q.put({"type": "progress", "done": done, "total": total, "current": bl.title})
+            old_difficulty = bl.difficulty
             try:
                 difficulty = classify_difficulty(bl.title, bl.description, [])
                 if difficulty and difficulty in ("입문", "초급", "중급", "고급"):
-                    bl.difficulty = difficulty
-                    bl.save(update_fields=["difficulty"])
+                    results.append({
+                        "book_list_id": bl.id,
+                        "title": bl.title,
+                        "old_difficulty": old_difficulty,
+                        "new_difficulty": difficulty,
+                    })
                     done += 1
                     q.put({"type": "log", "status": "success",
                            "title": bl.title, "difficulty": difficulty})
@@ -379,7 +394,8 @@ def _classify_worker(job_id: str, q: Queue, targets: list, cancel_event: threadi
                        "title": bl.title, "error": str(e)})
 
         if not cancel_event.is_set():
-            q.put({"type": "complete", "done": done, "errors": errors, "total": total})
+            q.put({"type": "preview", "done": done, "errors": errors,
+                   "total": total, "results": results})
     except Exception as e:
         q.put({"type": "fatal", "error": str(e)})
     finally:
@@ -391,6 +407,25 @@ def _classify_worker(job_id: str, q: Queue, targets: list, cancel_event: threadi
 def classify_stream(request, job_id: str):
     """SSE 스트림 — 난이도 분류 진행 상황."""
     return _make_sse_response(_classify_jobs, _classify_jobs_lock, job_id)
+
+
+@_staff_required
+@require_POST
+def classify_apply(request):
+    """선택된 분류 결과를 DB에 반영한다."""
+    data = json.loads(request.body)
+    items = data.get("items", [])
+    from books.models import BookList
+    valid = ("입문", "초급", "중급", "고급")
+    applied = 0
+    for item in items:
+        bl_id = item.get("book_list_id")
+        diff = item.get("difficulty")
+        if not bl_id or diff not in valid:
+            continue
+        BookList.objects.filter(pk=bl_id).update(difficulty=diff)
+        applied += 1
+    return JsonResponse({"ok": True, "applied": applied})
 
 
 # ── 출판 연도 추출 ────────────────────────────────────────────
@@ -600,6 +635,7 @@ def apply_book_candidate(request):
         if not info:
             return JsonResponse({"error": "알라딘에서 도서 정보를 가져올 수 없습니다."}, status=404)
 
+        from books.services import _save_thumbnail
         update_fields = []
         if info.get("thumbnail_url"):
             bl.thumbnail_url = info["thumbnail_url"]
@@ -611,6 +647,10 @@ def apply_book_candidate(request):
             bl.toc = info["toc"]
             update_fields.append("toc")
 
+        if bl.thumbnail_url and (info.get("thumbnail_url") or not bl.thumbnail):
+            if _save_thumbnail(bl, bl.thumbnail_url):
+                update_fields.append("thumbnail")
+
         if update_fields:
             bl.save(update_fields=update_fields)
 
@@ -619,6 +659,322 @@ def apply_book_candidate(request):
         return JsonResponse({"error": "도서 없음"}, status=404)
     except Exception as exc:
         return JsonResponse({"error": str(exc)}, status=500)
+
+
+# ── YES24 후보 수집 파이프라인 ────────────────────────────────
+
+_yes24_jobs: dict[str, Queue] = {}
+_yes24_jobs_lock = threading.Lock()
+_yes24_running = threading.Event()
+
+
+@_staff_required
+@require_POST
+def run_yes24_pipeline(request):
+    """YES24 검색 1차 수집 — 도서별 후보 목록을 DB에 저장하고 job_id 반환.
+
+    body.resume (bool, default True): True이면 이미 후보가 있는 도서는 건너뜀.
+    """
+    if _yes24_running.is_set():
+        if not _parse_force(request):
+            return JsonResponse({"error": "이미 YES24 수집이 진행 중입니다."}, status=409)
+        _yes24_running.clear()
+
+    body = json.loads(request.body or "{}")
+    resume = body.get("resume", True)
+
+    job_id = str(uuid.uuid4())
+    q: Queue = Queue()
+    cancel_event = _register_cancel(job_id)
+    with _yes24_jobs_lock:
+        _yes24_jobs[job_id] = q
+
+    _yes24_running.set()
+    threading.Thread(
+        target=_yes24_pipeline_worker,
+        args=(job_id, q, cancel_event, resume),
+        daemon=True,
+    ).start()
+    return JsonResponse({"job_id": job_id})
+
+
+def _yes24_pipeline_worker(job_id: str, q: Queue, cancel_event: threading.Event, resume: bool = True):
+    try:
+        from books.models import BookList, YES24Candidate
+        from books.services import fetch_yes24_candidates
+
+        all_book_lists = list(BookList.objects.select_related("author").order_by("title"))
+
+        if resume:
+            # 이미 후보가 수집된 도서는 건너뜀
+            processed_ids = set(
+                YES24Candidate.objects.values_list("book_list_id", flat=True).distinct()
+            )
+            book_lists = [bl for bl in all_book_lists if bl.id not in processed_ids]
+            skipped = len(all_book_lists) - len(book_lists)
+        else:
+            book_lists = all_book_lists
+            skipped = 0
+
+        total = len(book_lists)
+        q.put({"type": "start", "total": total, "skipped": skipped})
+
+        done = errors = 0
+        for bl in book_lists:
+            if cancel_event.is_set():
+                q.put({"type": "cancelled", "done": done, "total": total})
+                break
+
+            q.put({"type": "progress", "done": done, "total": total, "current": bl.full_title})
+            try:
+                candidates = fetch_yes24_candidates(bl.full_title)
+                # 기존 후보 초기화 후 새로 저장
+                YES24Candidate.objects.filter(book_list=bl).delete()
+                for c in candidates:
+                    YES24Candidate.objects.create(
+                        book_list=bl,
+                        title=c["title"],
+                        subtitle=c.get("subtitle", ""),
+                        href=c["href"],
+                        edition_info=c.get("edition_info", ""),
+                    )
+                done += 1
+                q.put({
+                    "type": "log", "status": "success",
+                    "title": bl.full_title,
+                    "count": len(candidates),
+                })
+            except Exception as exc:
+                errors += 1
+                q.put({"type": "log", "status": "error",
+                       "title": bl.full_title, "error": str(exc)})
+
+            # rate limit
+            import time as _time
+            _time.sleep(0.5)
+
+        if not cancel_event.is_set():
+            q.put({"type": "complete", "done": done, "errors": errors, "total": total})
+    except Exception as exc:
+        q.put({"type": "fatal", "error": str(exc)})
+    finally:
+        q.put(None)
+        _yes24_running.clear()
+        _unregister_cancel(job_id)
+        from django.core.cache import cache
+        cache.delete(_PIPELINE_STATS_CACHE_KEY)
+
+
+def yes24_pipeline_stream(request, job_id: str):
+    return _make_sse_response(_yes24_jobs, _yes24_jobs_lock, job_id)
+
+
+# ── YES24 후보 관리 ───────────────────────────────────────────
+
+@_staff_required
+def get_yes24_candidates(request):
+    """저장된 YES24 후보 목록을 book_list 단위로 반환."""
+    from books.models import YES24Candidate
+
+    raw = (
+        YES24Candidate.objects
+        .select_related("book_list__author")
+        .order_by("book_list__title", "created_at")
+    )
+
+    groups: dict[int, dict] = {}
+    for cand in raw:
+        bl = cand.book_list
+        if bl.pk not in groups:
+            # 해당 book_list에 연결된 book_code 수집
+            codes = list(bl.books.values_list("book_code", flat=True))
+            groups[bl.pk] = {
+                "book_list_id": bl.pk,
+                "book_title":   bl.full_title,
+                "book_codes":   codes,
+                "candidates":   [],
+            }
+        groups[bl.pk]["candidates"].append({
+            "id":           cand.pk,
+            "title":        cand.title,
+            "subtitle":     cand.subtitle,
+            "href":         cand.href,
+            "edition_info": cand.edition_info,
+        })
+
+    return JsonResponse({"groups": list(groups.values())})
+
+
+@_staff_required
+@require_POST
+def apply_yes24_candidate(request):
+    """선택한 YES24 후보의 상세 페이지를 수집하여 BookList에 덮어씁니다 (2-3).
+    후보 적용 후 해당 book_list의 후보 전체 삭제 (2-4).
+    """
+    body = json.loads(request.body or "{}")
+    book_list_id = body.get("book_list_id")
+    href = body.get("href")
+    if not book_list_id or not href:
+        return JsonResponse({"error": "book_list_id, href 필요"}, status=400)
+
+    from books.models import BookList, Author, Publisher, YES24Candidate
+    from books.services import fetch_yes24_book_detail, _save_thumbnail
+    import logging as _log
+    _logger = _log.getLogger(__name__)
+
+    try:
+        bl = BookList.objects.select_related("author", "publisher").get(pk=book_list_id)
+    except BookList.DoesNotExist:
+        return JsonResponse({"error": "도서 없음"}, status=404)
+
+    info = fetch_yes24_book_detail(href)
+    if not info:
+        return JsonResponse({"error": "YES24 상세 수집 실패"}, status=500)
+
+    update_fields = []
+    prev_description = bl.description
+
+    if info.get("title"):
+        bl.title = info["title"].strip()
+        update_fields.append("title")
+
+    if "subtitle" in info:
+        bl.subtitle = info["subtitle"].strip()
+        update_fields.append("subtitle")
+
+    if info.get("author"):
+        author, _ = Author.objects.get_or_create(name=info["author"].strip())
+        bl.author = author
+        update_fields.append("author")
+
+    if info.get("publisher"):
+        publisher, _ = Publisher.objects.get_or_create(name=info["publisher"].strip())
+        bl.publisher = publisher
+        update_fields.append("publisher")
+
+    if info.get("description"):
+        bl.description = info["description"]
+        update_fields.append("description")
+
+    if info.get("toc"):
+        bl.toc = info["toc"]
+        update_fields.append("toc")
+
+    if info.get("thumbnail_url"):
+        bl.thumbnail_url = info["thumbnail_url"]
+        update_fields.append("thumbnail_url")
+
+    if info.get("edition_info"):
+        bl.edition = info["edition_info"]
+        update_fields.append("edition")
+
+    if update_fields:
+        bl.save(update_fields=update_fields)
+
+    # 썸네일 파일 갱신
+    if info.get("thumbnail_url"):
+        if bl.thumbnail:
+            bl.thumbnail.delete(save=False)
+        if _save_thumbnail(bl, info["thumbnail_url"]):
+            bl.save(update_fields=["thumbnail"])
+
+    # 설명이 변경됐으면 임베딩 재생성 (백그라운드)
+    if "description" in update_fields and bl.description:
+        from books.services import refresh_embedding
+        threading.Thread(target=refresh_embedding, args=(bl,), daemon=True).start()
+
+    # 해당 book_list 후보 전체 삭제 (2-4)
+    YES24Candidate.objects.filter(book_list=bl).delete()
+    from django.core.cache import cache
+    cache.delete(_PIPELINE_STATS_CACHE_KEY)
+
+    return JsonResponse({"ok": True, "updated_fields": update_fields})
+
+
+@_staff_required
+@require_POST
+def dismiss_yes24_candidates(request):
+    """해당 book_list의 YES24 후보를 적용 없이 삭제합니다."""
+    body = json.loads(request.body or "{}")
+    book_list_id = body.get("book_list_id")
+    if not book_list_id:
+        return JsonResponse({"error": "book_list_id 필요"}, status=400)
+
+    from books.models import YES24Candidate
+    deleted, _ = YES24Candidate.objects.filter(book_list_id=book_list_id).delete()
+    from django.core.cache import cache
+    cache.delete(_PIPELINE_STATS_CACHE_KEY)
+    return JsonResponse({"ok": True, "deleted": deleted})
+
+
+@_staff_required
+@require_POST
+def reset_yes24_candidates(request):
+    """수집된 YES24 후보 전체를 초기화합니다."""
+    from books.models import YES24Candidate
+    deleted, _ = YES24Candidate.objects.all().delete()
+    from django.core.cache import cache
+    cache.delete(_PIPELINE_STATS_CACHE_KEY)
+    return JsonResponse({"ok": True, "deleted": deleted})
+
+
+# ── 미사용 썸네일 정리 ────────────────────────────────────────
+
+def _get_orphan_thumbnails() -> list[str]:
+    """스토리지의 thumbnails/ 디렉터리에서 DB에 참조되지 않는 파일 경로 목록을 반환합니다."""
+    from django.core.files.storage import default_storage
+    from books.models import BookList
+
+    used = set(
+        BookList.objects
+        .exclude(thumbnail="")
+        .values_list("thumbnail", flat=True)
+    )
+    try:
+        _, filenames = default_storage.listdir("thumbnails/")
+    except (FileNotFoundError, OSError):
+        return []
+
+    orphans = []
+    for filename in filenames:
+        path = f"thumbnails/{filename}"
+        if path not in used:
+            orphans.append(path)
+    return orphans
+
+
+@_staff_required
+def scan_thumbnails(request):
+    """미사용 썸네일 파일 목록을 반환합니다 (삭제하지 않음)."""
+    orphans = _get_orphan_thumbnails()
+    return JsonResponse({"count": len(orphans), "files": orphans})
+
+
+@_staff_required
+@require_POST
+def clean_thumbnails(request):
+    """미사용 썸네일 파일을 일괄 삭제합니다."""
+    import logging as _logging
+    _logger = _logging.getLogger(__name__)
+
+    from django.core.files.storage import default_storage
+
+    orphans = _get_orphan_thumbnails()
+    deleted = []
+    failed = []
+    for path in orphans:
+        try:
+            default_storage.delete(path)
+            deleted.append(path.split("/")[-1])
+        except Exception as exc:
+            _logger.warning("썸네일 삭제 실패 (%s): %s", path, exc)
+            failed.append(path.split("/")[-1])
+
+    return JsonResponse({
+        "deleted": len(deleted),
+        "failed": len(failed),
+        "files": deleted,
+    })
 
 
 # ── SSE 공통 헬퍼 ─────────────────────────────────────────────

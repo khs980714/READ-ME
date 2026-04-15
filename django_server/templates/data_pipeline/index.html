@@ -169,13 +169,30 @@
     <p class="stat-label">카테고리 미분류 도서</p>
     <p class="stat-value" style="color:{% if missing_category %}#d97706{% else %}var(--primary){% endif %}">{{ missing_category }}</p>
   </div>
+  <div class="stat-card">
+    <p class="stat-label">YES24 후보 선택 대기</p>
+    <p class="stat-value" style="color:{% if yes24_pending %}#d97706{% else %}var(--primary){% endif %}">{{ yes24_pending }}</p>
+  </div>
 </div>
 
 <!-- ── 파이프라인 실행 ── -->
 <div class="pipeline-card">
   <h2>파이프라인 실행</h2>
-  <p class="card-desc">
-    알라딘 API로 도서 정보(설명·썸네일·ISBN·목차)를 수집하고,
+
+  <!-- 수집 소스 선택 -->
+  <div style="display:flex; gap:20px; margin-bottom:16px; padding:14px 16px; background:var(--bg); border:1px solid var(--border); border-radius:8px;">
+    <label style="display:inline-flex; align-items:center; gap:7px; cursor:pointer; font-size:0.9rem; font-weight:600;">
+      <input type="radio" name="pipelineSource" value="aladin" checked style="accent-color:var(--primary);">
+      알라딘 API
+    </label>
+    <label style="display:inline-flex; align-items:center; gap:7px; cursor:pointer; font-size:0.9rem; font-weight:600;">
+      <input type="radio" name="pipelineSource" value="yes24" style="accent-color:var(--primary);">
+      YES24
+    </label>
+  </div>
+
+  <p class="card-desc" id="pipelineDesc">
+    알라딘 API로 도서 정보(설명·썸네일·목차)를 수집하고,
     LLM으로 난이도를 분류합니다.
     설명이 없는 <strong>{{ pending }}권</strong>이 대상입니다.
   </p>
@@ -256,17 +273,17 @@
 <div class="pipeline-card">
   <h2>난이도 분류 진행</h2>
   <p class="card-desc">
-    설명은 있지만 난이도가 미분류인 <strong>{{ unclassified }}권</strong>을 대상으로
-    도서 설명을 기반으로 LLM이 난이도를 분류합니다.
-    {% if not unclassified %}현재 미분류 도서가 없습니다.{% endif %}
+    설명이 있는 전체 도서를 대상으로 LLM이 난이도를 재분류합니다.
+    분류 완료 후 <strong>기존 난이도</strong>와 달라진 항목을 표로 확인하고,
+    원하는 항목만 선택해 적용하거나 취소할 수 있습니다.
   </p>
 
   <div class="pipeline-controls">
-    <button class="btn-primary" id="btnClassify" {% if not unclassified %}disabled{% endif %}>
+    <button class="btn-primary" id="btnClassify">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
       </svg>
-      난이도 분류 시작 ({{ unclassified }}권)
+      난이도 분류 시작
     </button>
     <button class="btn-danger" id="btnClassifyStop" style="display:none;">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -289,6 +306,37 @@
   </div>
   <div class="log-wrap" id="classifyLogWrap" style="display:none;">
     <div id="classifyLog"></div>
+  </div>
+
+  <!-- 분류 결과 비교 테이블 -->
+  <div id="classifyPreviewWrap" style="display:none; margin-top:24px;">
+    <h3 style="font-size:0.95rem; font-weight:700; margin-bottom:4px; color:var(--text);">분류 결과 비교</h3>
+    <p style="font-size:0.84rem; color:var(--text-sub); margin-bottom:14px;">
+      체크된 항목만 적용됩니다. 제외할 항목은 체크를 해제하세요.
+    </p>
+    <div style="overflow-x:auto; border:1px solid var(--border); border-radius:8px; margin-bottom:16px;">
+      <table id="classifyPreviewTable" style="width:100%; border-collapse:collapse; font-size:0.87rem;">
+        <thead>
+          <tr style="background:var(--bg); border-bottom:2px solid var(--border);">
+            <th style="padding:10px 14px; text-align:center; width:44px;">
+              <input type="checkbox" id="classifySelectAll" checked style="accent-color:var(--primary); cursor:pointer;">
+            </th>
+            <th style="padding:10px 14px; text-align:left; font-weight:600;">제목</th>
+            <th style="padding:10px 14px; text-align:center; width:120px; font-weight:600;">기존 난이도</th>
+            <th style="padding:10px 14px; text-align:center; width:140px; font-weight:600;">새로 분류된 난이도</th>
+          </tr>
+        </thead>
+        <tbody id="classifyPreviewBody"></tbody>
+      </table>
+    </div>
+    <p id="classifyNoChanges" style="display:none; font-size:0.87rem; color:var(--text-muted); padding:8px 0;">
+      변경된 난이도 항목이 없습니다.
+    </p>
+    <div class="pipeline-controls" id="classifyPreviewControls">
+      <button class="btn-primary" id="btnClassifyApply">적용</button>
+      <button class="btn-ghost" id="btnClassifyCancel">취소</button>
+      <span id="classifyApplyStatus" style="font-size:0.85rem; margin-left:6px;"></span>
+    </div>
   </div>
 </div>
 <!-- ── 출판 연도 추출 ── -->
@@ -376,6 +424,68 @@
   </div>
 </div>
 
+<!-- ── YES24 후보 선택 ── -->
+<div class="pipeline-card">
+  <h2>YES24 후보 선택</h2>
+  <p class="card-desc">
+    YES24 수집 파이프라인 실행 후 저장된 후보 목록입니다.
+    도서별로 수집된 후보 중 하나를 선택하면 상세 페이지에서 썸네일·저자·출판사·설명·목차를 수집하여 DB에 덮어씁니다.
+    현재 대기 중: <strong id="yes24PendingCount">{{ yes24_pending }}</strong>건
+  </p>
+
+  <div class="pipeline-controls">
+    <button class="btn-primary" id="btnYes24Load">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/>
+        <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+      </svg>
+      후보 목록 불러오기
+    </button>
+    <button class="btn-danger" id="btnYes24Reset">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>
+        <path d="M9 6V4h6v2"/>
+      </svg>
+      전체 초기화
+    </button>
+  </div>
+
+  <div id="yes24CandidateWrap" style="display:none; margin-top:16px;">
+    <div id="yes24CandidateList"></div>
+  </div>
+</div>
+
+<!-- ── 미사용 썸네일 정리 ── -->
+<div class="pipeline-card">
+  <h2>미사용 썸네일 정리</h2>
+  <p class="card-desc">
+    스토리지에 저장되어 있지만 현재 어떤 도서에도 연결되지 않은 썸네일 파일을 찾아 삭제합니다.
+    도서가 삭제되거나 썸네일이 교체될 때 남은 고아(orphan) 파일이 대상입니다.
+  </p>
+
+  <div class="pipeline-controls">
+    <button class="btn-ghost" id="btnThumbScan">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      스캔
+    </button>
+    <button class="btn-danger" id="btnThumbClean" style="display:none;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>
+        <path d="M9 6V4h6v2"/>
+      </svg>
+      미사용 파일 삭제
+    </button>
+    <span class="status-badge" id="thumbStatus"></span>
+  </div>
+
+  <div id="thumbResult" style="display:none; margin-top:16px;">
+    <div id="thumbSummary" style="font-size:0.88rem; color:var(--text-sub); margin-bottom:12px;"></div>
+    <div id="thumbFileList" class="log-wrap" style="max-height:200px;"></div>
+  </div>
+</div>
+
 <!-- ── 도서 후보 선택 팝오버 ── -->
 <div id="candidateOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:1000; align-items:center; justify-content:center;">
   <div style="background:var(--surface); border:1px solid var(--border); border-radius:12px; width:min(600px,94vw); max-height:80vh; display:flex; flex-direction:column; box-shadow:0 16px 40px rgba(0,0,0,.2);">
@@ -407,12 +517,21 @@
   const EMBED_STREAM           = "{% url 'pipeline:embed_stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
   const CLASSIFY_RUN_URL       = "{% url 'pipeline:classify_run' %}";
   const CLASSIFY_STREAM        = "{% url 'pipeline:classify_stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
+  const CLASSIFY_APPLY_URL     = "{% url 'pipeline:classify_apply' %}";
   const YEAR_RUN_URL           = "{% url 'pipeline:year_run' %}";
   const YEAR_STREAM            = "{% url 'pipeline:year_stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
   const CANDIDATES_SEARCH_URL  = "{% url 'pipeline:candidates_search' %}";
   const CANDIDATES_APPLY_URL   = "{% url 'pipeline:candidates_apply' %}";
   const CATEGORY_RUN_URL       = "{% url 'pipeline:category_run' %}";
   const CATEGORY_STREAM        = "{% url 'pipeline:category_stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
+  const THUMB_SCAN_URL         = "{% url 'pipeline:thumbnails_scan' %}";
+  const THUMB_CLEAN_URL        = "{% url 'pipeline:thumbnails_clean' %}";
+  const YES24_RUN_URL          = "{% url 'pipeline:yes24_run' %}";
+  const YES24_STREAM           = "{% url 'pipeline:yes24_stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
+  const YES24_CANDIDATES_URL   = "{% url 'pipeline:yes24_candidates' %}";
+  const YES24_APPLY_URL        = "{% url 'pipeline:yes24_apply' %}";
+  const YES24_DISMISS_URL      = "{% url 'pipeline:yes24_dismiss' %}";
+  const YES24_RESET_URL        = "{% url 'pipeline:yes24_reset' %}";
 
   // ── 공통 로그 렌더러 ─────────────────────────────────────────
   function appendLog(container, type, opts = {}) {
@@ -580,6 +699,276 @@
     overlay.style.display = "flex";
   }
 
+  // ── 파이프라인 소스 선택 ────────────────────────────────────
+  const pipelineDescEl = document.getElementById("pipelineDesc");
+  const DESC_ALADIN = `알라딘 API로 도서 정보(설명·썸네일·목차)를 수집하고, LLM으로 난이도를 분류합니다. 설명이 없는 <strong>{{ pending }}권</strong>이 대상입니다.`;
+  const DESC_YES24  = `YES24 검색에서 도서별 후보 목록을 수집하여 저장합니다. 수집 후 <strong>YES24 후보 선택</strong> 카드에서 원하는 도서를 선택해 DB에 덮어쓸 수 있습니다.`;
+
+  document.querySelectorAll("input[name='pipelineSource']").forEach(radio => {
+    radio.addEventListener("change", () => {
+      pipelineDescEl.innerHTML = radio.value === "yes24" ? DESC_YES24 : DESC_ALADIN;
+    });
+  });
+
+  function getSelectedSource() {
+    return document.querySelector("input[name='pipelineSource']:checked")?.value || "aladin";
+  }
+
+  // ── YES24 후보 선택 카드 ─────────────────────────────────────
+  (function () {
+    const btnLoad   = document.getElementById("btnYes24Load");
+    const btnReset  = document.getElementById("btnYes24Reset");
+    const wrap      = document.getElementById("yes24CandidateWrap");
+    const listEl    = document.getElementById("yes24CandidateList");
+    const countEl   = document.getElementById("yes24PendingCount");
+
+    btnLoad.addEventListener("click", loadCandidates);
+
+    btnReset.addEventListener("click", async () => {
+      const cur = parseInt(countEl.textContent || "0");
+      if (!confirm(`수집된 YES24 후보 전체(${cur}건)를 초기화합니다.\n다음 파이프라인 실행 시 처음부터 다시 수집합니다.\n계속하겠습니까?`)) return;
+      btnReset.disabled = true;
+      try {
+        const res  = await fetch(YES24_RESET_URL, {
+          method: "POST",
+          headers: { "X-CSRFToken": CSRF_TOKEN },
+        });
+        const data = await res.json();
+        if (data.ok) {
+          countEl.textContent = "0";
+          listEl.innerHTML = '<p style="font-size:0.88rem; color:var(--text-muted); padding:12px 0;">초기화 완료. 대기 중인 후보가 없습니다.</p>';
+          wrap.style.display = "block";
+        } else {
+          alert("초기화 실패: " + (data.error || "알 수 없는 오류"));
+        }
+      } catch (e) {
+        alert("서버 연결 실패: " + e.message);
+      } finally {
+        btnReset.disabled = false;
+      }
+    });
+
+    async function loadCandidates() {
+      btnLoad.disabled = true;
+      btnLoad.textContent = "불러오는 중...";
+      try {
+        const res  = await fetch(YES24_CANDIDATES_URL);
+        const data = await res.json();
+        renderGroups(data.groups || []);
+        wrap.style.display = "block";
+      } catch (e) {
+        alert("후보 목록 로드 실패: " + e.message);
+      } finally {
+        btnLoad.disabled = false;
+        btnLoad.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg> 후보 목록 불러오기`;
+      }
+    }
+
+    function renderGroups(groups) {
+      listEl.innerHTML = "";
+      if (!groups.length) {
+        listEl.innerHTML = '<p style="font-size:0.88rem; color:var(--text-muted); padding:12px 0;">대기 중인 후보가 없습니다.</p>';
+        countEl.textContent = "0";
+        return;
+      }
+      countEl.textContent = groups.length;
+      groups.forEach(g => listEl.appendChild(buildGroupEl(g)));
+    }
+
+    function buildGroupEl(g) {
+      const wrap = document.createElement("div");
+      wrap.dataset.bookListId = g.book_list_id;
+      wrap.style.cssText = "border:1px solid var(--border); border-radius:8px; margin-bottom:14px; overflow:hidden;";
+
+      // 헤더
+      const header = document.createElement("div");
+      header.style.cssText = "display:flex; align-items:center; justify-content:space-between; padding:12px 16px; background:var(--bg); border-bottom:1px solid var(--border);";
+      header.innerHTML = `
+        <div>
+          <span style="font-weight:700; font-size:0.92rem;">${escHtml(g.book_title)}</span>
+          <span style="font-size:0.78rem; color:var(--text-muted); margin-left:8px;">${g.book_codes.map(c => escHtml(c)).join(", ")}</span>
+        </div>`;
+      const dismissBtn = document.createElement("button");
+      dismissBtn.className = "btn-ghost";
+      dismissBtn.style.cssText = "font-size:0.78rem; padding:3px 10px; color:var(--text-muted);";
+      dismissBtn.textContent = "건너뜀";
+      dismissBtn.addEventListener("click", () => dismiss(g.book_list_id, wrap));
+      header.appendChild(dismissBtn);
+      wrap.appendChild(header);
+
+      // 후보 목록
+      g.candidates.forEach(c => {
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex; align-items:center; gap:12px; padding:10px 16px; border-bottom:1px solid var(--border); font-size:0.88rem;";
+        row.innerHTML = `
+          <div style="flex:1;">
+            <a href="${escHtml(c.href)}" target="_blank" rel="noopener noreferrer" style="font-weight:600; color:inherit; text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${escHtml(c.title)}</a>
+            ${c.subtitle    ? `<span style="color:var(--text-muted); margin-left:6px;">${escHtml(c.subtitle)}</span>` : ""}
+            ${c.edition_info ? `<span style="margin-left:6px; font-size:0.78rem; background:#e0e7ff; color:#4338ca; border-radius:4px; padding:1px 6px;">${escHtml(c.edition_info)}</span>` : ""}
+          </div>`;
+        const selectBtn = document.createElement("button");
+        selectBtn.className = "btn-primary";
+        selectBtn.style.cssText = "font-size:0.78rem; padding:4px 12px; flex-shrink:0;";
+        selectBtn.textContent = "선택";
+        selectBtn.addEventListener("click", () => apply(g.book_list_id, c.href, c.title, wrap, selectBtn));
+        row.appendChild(selectBtn);
+        wrap.appendChild(row);
+      });
+
+      // 결과 메시지 영역
+      const msg = document.createElement("div");
+      msg.className = "group-msg";
+      msg.style.cssText = "padding:8px 16px; font-size:0.82rem; display:none;";
+      wrap.appendChild(msg);
+
+      return wrap;
+    }
+
+    async function apply(bookListId, href, title, groupEl, btn) {
+      if (!confirm(`"${title}" 으로 DB를 덮어쓰겠습니까?\n상세 페이지에서 썸네일·저자·출판사·설명·목차를 수집합니다.`)) return;
+      btn.disabled = true;
+      btn.textContent = "수집 중...";
+      const msg = groupEl.querySelector(".group-msg");
+      msg.style.display = "block";
+      msg.style.color = "var(--text-muted)";
+      msg.textContent = "YES24 상세 페이지 수집 중...";
+      try {
+        const res  = await fetch(YES24_APPLY_URL, {
+          method: "POST",
+          headers: { "X-CSRFToken": CSRF_TOKEN, "Content-Type": "application/json" },
+          body: JSON.stringify({ book_list_id: bookListId, href }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          msg.style.color = "#16a34a";
+          msg.textContent = `✓ 적용 완료 — ${(data.updated_fields || []).join(", ")}`;
+          countEl.textContent = Math.max(0, parseInt(countEl.textContent || "0") - 1);
+          setTimeout(() => groupEl.remove(), 1800);
+        } else {
+          msg.style.color = "#dc2626";
+          msg.textContent = "✗ 오류: " + (data.error || "알 수 없는 오류");
+          btn.disabled = false;
+          btn.textContent = "선택";
+        }
+      } catch (e) {
+        msg.style.color = "#dc2626";
+        msg.textContent = "서버 연결 실패";
+        btn.disabled = false;
+        btn.textContent = "선택";
+      }
+    }
+
+    async function dismiss(bookListId, groupEl) {
+      try {
+        await fetch(YES24_DISMISS_URL, {
+          method: "POST",
+          headers: { "X-CSRFToken": CSRF_TOKEN, "Content-Type": "application/json" },
+          body: JSON.stringify({ book_list_id: bookListId }),
+        });
+        countEl.textContent = Math.max(0, parseInt(countEl.textContent || "0") - 1);
+        groupEl.remove();
+      } catch (e) {
+        alert("건너뜀 처리 실패: " + e.message);
+      }
+    }
+  })();
+
+  // ── 미사용 썸네일 정리 ─────────────────────────────────────
+  (function () {
+    const btnScan    = document.getElementById("btnThumbScan");
+    const btnClean   = document.getElementById("btnThumbClean");
+    const statusBadge = document.getElementById("thumbStatus");
+    const resultWrap = document.getElementById("thumbResult");
+    const summary    = document.getElementById("thumbSummary");
+    const fileList   = document.getElementById("thumbFileList");
+
+    let scannedFiles = [];
+
+    function setStatus(state) {
+      statusBadge.className = "status-badge " + state;
+      const labels = { running: "스캔 중...", done: "완료", failed: "오류 발생" };
+      statusBadge.textContent = labels[state] || "";
+    }
+
+    btnScan.addEventListener("click", async () => {
+      btnScan.disabled = true;
+      btnClean.style.display = "none";
+      resultWrap.style.display = "none";
+      fileList.innerHTML = "";
+      setStatus("running");
+
+      try {
+        const res  = await fetch(THUMB_SCAN_URL);
+        const data = await res.json();
+        scannedFiles = data.files || [];
+        const count  = data.count || 0;
+
+        setStatus("done");
+        resultWrap.style.display = "block";
+
+        if (count === 0) {
+          summary.textContent = "미사용 파일이 없습니다.";
+          btnClean.style.display = "none";
+        } else {
+          summary.innerHTML = `미사용 파일 <strong>${count}개</strong>가 발견되었습니다.`;
+          btnClean.style.display = "inline-flex";
+          scannedFiles.forEach(p => {
+            const row = document.createElement("div");
+            row.className = "log-entry info";
+            row.innerHTML = `<span class="log-icon">·</span><span class="log-sub-msg">${escHtml(p)}</span>`;
+            fileList.appendChild(row);
+          });
+        }
+      } catch (e) {
+        setStatus("failed");
+        summary.textContent = "스캔 실패: " + e.message;
+        resultWrap.style.display = "block";
+      } finally {
+        btnScan.disabled = false;
+      }
+    });
+
+    btnClean.addEventListener("click", async () => {
+      if (!scannedFiles.length) return;
+      if (!confirm(`미사용 썸네일 ${scannedFiles.length}개를 삭제합니다.\n이 작업은 되돌릴 수 없습니다.`)) return;
+
+      btnClean.disabled = true;
+      btnScan.disabled  = true;
+      setStatus("running");
+      statusBadge.textContent = "삭제 중...";
+
+      try {
+        const res  = await fetch(THUMB_CLEAN_URL, {
+          method: "POST",
+          headers: { "X-CSRFToken": CSRF_TOKEN },
+        });
+        const data = await res.json();
+
+        setStatus("done");
+        scannedFiles = [];
+        btnClean.style.display = "none";
+        fileList.innerHTML = "";
+
+        let msg = `${data.deleted}개 삭제 완료.`;
+        if (data.failed) msg += ` (실패 ${data.failed}개)`;
+        summary.innerHTML = msg;
+
+        (data.files || []).forEach(f => {
+          const row = document.createElement("div");
+          row.className = "log-entry success";
+          row.innerHTML = `<span class="log-icon">✓</span><span class="log-title">${escHtml(f)}</span>`;
+          fileList.appendChild(row);
+        });
+      } catch (e) {
+        setStatus("failed");
+        summary.textContent = "삭제 실패: " + e.message;
+      } finally {
+        btnClean.disabled = false;
+        btnScan.disabled  = false;
+      }
+    });
+  })();
+
   function escHtml(str) {
     return String(str || "")
       .replace(/&/g, "&amp;").replace(/</g, "&lt;")
@@ -604,7 +993,7 @@
   function createStreamHandler({ runUrl, streamBase, btn, stopBtn, statusBadge,
                                   progressWrap, progressBar, progressText, progressPct,
                                   currentEl, stepEl, logWrap, logContainer,
-                                  startLabel }) {
+                                  startLabel, extraBody }) {
     let es = null;
     let currentJobId = null;
 
@@ -622,11 +1011,13 @@
       currentEl.textContent = `${startLabel} 시작 중...`;
       setStatus(statusBadge, "running");
 
+      const effectiveRunUrl = typeof runUrl === "function" ? runUrl() : runUrl;
+      const effectiveStreamBase = typeof streamBase === "function" ? streamBase() : streamBase;
       try {
-        const res = await fetch(runUrl, {
+        const res = await fetch(effectiveRunUrl, {
           method: "POST",
           headers: { "X-CSRFToken": CSRF_TOKEN, "Content-Type": "application/json" },
-          body: JSON.stringify(force ? { force: true } : {}),
+          body: JSON.stringify(Object.assign({}, typeof extraBody === "function" ? extraBody() : (extraBody || {}), force ? { force: true } : {})),
         });
         const data = await res.json();
         if (res.status === 409) {
@@ -643,7 +1034,7 @@
           setRunning(false);
           return;
         }
-        startStream(data.job_id);
+        startStream(data.job_id, effectiveStreamBase);
       } catch (e) {
         appendLog(logContainer, "error", { errorMsg: "서버 연결 실패: " + e.message });
         setStatus(statusBadge, "failed");
@@ -667,17 +1058,18 @@
       });
     }
 
-    function startStream(jobId) {
+    function startStream(jobId, resolvedStreamBase) {
       currentJobId = jobId;
       if (es) es.close();
       let isDone = false;
-      es = new EventSource(streamBase + jobId + "/");
+      es = new EventSource(resolvedStreamBase + jobId + "/");
 
       es.onmessage = (e) => {
         const ev = JSON.parse(e.data);
 
         if (ev.type === "start") {
-          appendLog(logContainer, "info", { errorMsg: `총 ${ev.total}권 처리 시작` });
+          const skippedMsg = ev.skipped ? ` (${ev.skipped}권 이미 수집됨, 건너뜀)` : "";
+          appendLog(logContainer, "info", { errorMsg: `총 ${ev.total}권 처리 시작${skippedMsg}` });
 
         } else if (ev.type === "step") {
           if (stepEl) stepEl.textContent = ev.step || "";
@@ -755,8 +1147,9 @@
 
   // ── 파이프라인 섹션 ──────────────────────────────────────────
   createStreamHandler({
-    runUrl:       PIPELINE_RUN_URL,
-    streamBase:   PIPELINE_STREAM,
+    runUrl:       () => getSelectedSource() === "yes24" ? YES24_RUN_URL    : PIPELINE_RUN_URL,
+    streamBase:   () => getSelectedSource() === "yes24" ? YES24_STREAM     : PIPELINE_STREAM,
+    extraBody:    () => getSelectedSource() === "yes24" ? { resume: true } : {},
     btn:          document.getElementById("btnPipeline"),
     stopBtn:      document.getElementById("btnPipelineStop"),
     statusBadge:  document.getElementById("pipelineStatus"),
@@ -788,22 +1181,259 @@
     startLabel:   "임베딩",
   });
 
-  // ── 난이도 분류 섹션 ─────────────────────────────────────────
-  createStreamHandler({
-    runUrl:       CLASSIFY_RUN_URL,
-    streamBase:   CLASSIFY_STREAM,
-    btn:          document.getElementById("btnClassify"),
-    stopBtn:      document.getElementById("btnClassifyStop"),
-    statusBadge:  document.getElementById("classifyStatus"),
-    progressWrap: document.getElementById("classifyProgressWrap"),
-    progressBar:  document.getElementById("classifyProgressBar"),
-    progressText: document.getElementById("classifyProgressText"),
-    progressPct:  document.getElementById("classifyProgressPct"),
-    currentEl:    document.getElementById("classifyCurrent"),
-    logWrap:      document.getElementById("classifyLogWrap"),
-    logContainer: document.getElementById("classifyLog"),
-    startLabel:   "난이도 분류",
-  });
+  // ── 난이도 분류 섹션 (커스텀 핸들러) ────────────────────────────
+  (function () {
+    const btn          = document.getElementById("btnClassify");
+    const stopBtn      = document.getElementById("btnClassifyStop");
+    const statusBadge  = document.getElementById("classifyStatus");
+    const progressWrap = document.getElementById("classifyProgressWrap");
+    const progressBar  = document.getElementById("classifyProgressBar");
+    const progressText = document.getElementById("classifyProgressText");
+    const progressPct  = document.getElementById("classifyProgressPct");
+    const currentEl    = document.getElementById("classifyCurrent");
+    const logWrap      = document.getElementById("classifyLogWrap");
+    const logContainer = document.getElementById("classifyLog");
+    const previewWrap  = document.getElementById("classifyPreviewWrap");
+    const previewBody  = document.getElementById("classifyPreviewBody");
+    const selectAll    = document.getElementById("classifySelectAll");
+    const noChanges    = document.getElementById("classifyNoChanges");
+    const btnApply     = document.getElementById("btnClassifyApply");
+    const btnCancel    = document.getElementById("btnClassifyCancel");
+    const applyStatus  = document.getElementById("classifyApplyStatus");
+    const previewCtrl  = document.getElementById("classifyPreviewControls");
+
+    const DIFF_COLOR = {
+      "입문": "#16a34a", "초급": "#2563eb",
+      "중급": "#d97706", "고급": "#dc2626", "": "#94a3b8",
+    };
+
+    let es = null;
+    let currentJobId = null;
+    let previewResults = [];
+
+    function setRunning(running) {
+      btn.disabled = running;
+      stopBtn.style.display = running ? "inline-flex" : "none";
+    }
+
+    async function doRun(force = false) {
+      setRunning(true);
+      logContainer.innerHTML = "";
+      previewWrap.style.display = "none";
+      previewBody.innerHTML = "";
+      previewResults = [];
+      applyStatus.textContent = "";
+      progressWrap.style.display = "block";
+      logWrap.style.display = "block";
+      setProgress(progressBar, progressText, progressPct, 0, 0);
+      currentEl.textContent = "난이도 분류 시작 중...";
+      setStatus(statusBadge, "running");
+
+      try {
+        const res = await fetch(CLASSIFY_RUN_URL, {
+          method: "POST",
+          headers: { "X-CSRFToken": CSRF_TOKEN, "Content-Type": "application/json" },
+          body: JSON.stringify(force ? { force: true } : {}),
+        });
+        const data = await res.json();
+        if (res.status === 409) {
+          setRunning(false);
+          statusBadge.className = "status-badge";
+          if (confirm("진행 중인 난이도 분류 작업이 있습니다.\n다시 작업을 진행하겠습니까?")) doRun(true);
+          return;
+        }
+        if (!res.ok) {
+          appendLog(logContainer, "error", { errorMsg: data.error || "알 수 없는 오류" });
+          setStatus(statusBadge, "failed");
+          setRunning(false);
+          return;
+        }
+        startStream(data.job_id);
+      } catch (e) {
+        appendLog(logContainer, "error", { errorMsg: "서버 연결 실패: " + e.message });
+        setStatus(statusBadge, "failed");
+        setRunning(false);
+      }
+    }
+
+    btn.addEventListener("click", () => { if (!btn.disabled) doRun(); });
+
+    stopBtn.addEventListener("click", async () => {
+      if (!currentJobId) return;
+      stopBtn.disabled = true;
+      try {
+        await fetch(STOP_BASE + currentJobId + "/", {
+          method: "POST",
+          headers: { "X-CSRFToken": CSRF_TOKEN },
+        });
+      } catch (_) {}
+      stopBtn.disabled = false;
+    });
+
+    function startStream(jobId) {
+      currentJobId = jobId;
+      if (es) es.close();
+      let isDone = false;
+      es = new EventSource(CLASSIFY_STREAM + jobId + "/");
+
+      es.onmessage = (e) => {
+        const ev = JSON.parse(e.data);
+
+        if (ev.type === "start") {
+          appendLog(logContainer, "info", { errorMsg: `총 ${ev.total}권 분류 시작` });
+
+        } else if (ev.type === "progress") {
+          setProgress(progressBar, progressText, progressPct, ev.done, ev.total);
+          currentEl.textContent = ev.current ? `처리 중: ${ev.current}` : "";
+
+        } else if (ev.type === "log") {
+          if (ev.status === "success") {
+            appendLog(logContainer, "success", { title: ev.title, difficulty: ev.difficulty });
+          } else {
+            appendLog(logContainer, "error", { title: ev.title, errorMsg: ev.error });
+          }
+
+        } else if (ev.type === "cancelled") {
+          isDone = true;
+          currentEl.textContent = "";
+          appendLog(logContainer, "info", {
+            errorMsg: `중단됨 — ${ev.done}건 처리됨 (전체 ${ev.total}건 중)`,
+          });
+          setStatus(statusBadge, "cancelled");
+          es.close(); setRunning(false); currentJobId = null;
+
+        } else if (ev.type === "preview") {
+          isDone = true;
+          setProgress(progressBar, progressText, progressPct, ev.total, ev.total);
+          currentEl.textContent = "";
+          appendLog(logContainer, "info", {
+            errorMsg: `완료 — 성공: ${ev.done}건, 오류: ${ev.errors}건, 합계: ${ev.total}건`,
+          });
+          setStatus(statusBadge, ev.errors > 0 ? "failed" : "done");
+          es.close(); setRunning(false); currentJobId = null;
+          showPreview(ev.results || []);
+
+        } else if (ev.type === "fatal") {
+          isDone = true;
+          appendLog(logContainer, "error", { errorMsg: "치명적 오류: " + ev.error });
+          setStatus(statusBadge, "failed");
+          es.close(); setRunning(false); currentJobId = null;
+        }
+      };
+
+      es.onerror = () => {
+        if (isDone) return;
+        appendLog(logContainer, "error", { errorMsg: "스트림 연결이 끊겼습니다." });
+        setStatus(statusBadge, "failed");
+        es.close(); setRunning(false); currentJobId = null;
+      };
+    }
+
+    function showPreview(results) {
+      // 난이도가 변경된 항목만 표시
+      const changed = results.filter(r => r.old_difficulty !== r.new_difficulty);
+      previewResults = changed;
+      previewBody.innerHTML = "";
+      applyStatus.textContent = "";
+      selectAll.checked = true;
+
+      if (!changed.length) {
+        noChanges.style.display = "block";
+        previewCtrl.style.display = "none";
+        previewWrap.style.display = "block";
+        return;
+      }
+
+      noChanges.style.display = "none";
+      previewCtrl.style.display = "flex";
+
+      changed.forEach((r, i) => {
+        const oldLabel = r.old_difficulty || "(미분류)";
+        const oldColor = DIFF_COLOR[r.old_difficulty] ?? "#94a3b8";
+        const newColor = DIFF_COLOR[r.new_difficulty] ?? "#94a3b8";
+
+        const tr = document.createElement("tr");
+        tr.style.borderBottom = "1px solid var(--border)";
+        tr.innerHTML = `
+          <td style="padding:10px 14px; text-align:center;">
+            <input type="checkbox" class="classify-row-check" data-idx="${i}" checked
+              style="accent-color:var(--primary); cursor:pointer;">
+          </td>
+          <td style="padding:10px 14px;">${escHtml(r.title)}</td>
+          <td style="padding:10px 14px; text-align:center; color:${oldColor};">${escHtml(oldLabel)}</td>
+          <td style="padding:10px 14px; text-align:center; color:${newColor}; font-weight:700;">
+            → ${escHtml(r.new_difficulty)}
+          </td>`;
+        previewBody.appendChild(tr);
+      });
+
+      previewWrap.style.display = "block";
+    }
+
+    // 전체 선택/해제
+    selectAll.addEventListener("change", () => {
+      document.querySelectorAll(".classify-row-check")
+        .forEach(cb => { cb.checked = selectAll.checked; });
+    });
+
+    // 개별 체크박스 변경 시 전체 선택 상태 동기화
+    previewBody.addEventListener("change", (e) => {
+      if (!e.target.classList.contains("classify-row-check")) return;
+      const all     = previewBody.querySelectorAll(".classify-row-check");
+      const checked = previewBody.querySelectorAll(".classify-row-check:checked");
+      selectAll.checked = all.length === checked.length;
+    });
+
+    // 취소
+    btnCancel.addEventListener("click", () => {
+      previewWrap.style.display = "none";
+      previewResults = [];
+    });
+
+    // 적용
+    btnApply.addEventListener("click", async () => {
+      const items = [...previewBody.querySelectorAll(".classify-row-check:checked")]
+        .map(cb => {
+          const r = previewResults[parseInt(cb.dataset.idx)];
+          return { book_list_id: r.book_list_id, difficulty: r.new_difficulty };
+        });
+
+      if (!items.length) {
+        applyStatus.style.color = "var(--text-muted)";
+        applyStatus.textContent = "적용할 항목이 없습니다.";
+        return;
+      }
+
+      btnApply.disabled = true;
+      btnCancel.disabled = true;
+      applyStatus.style.color = "var(--text-muted)";
+      applyStatus.textContent = "적용 중...";
+
+      try {
+        const res = await fetch(CLASSIFY_APPLY_URL, {
+          method: "POST",
+          headers: { "X-CSRFToken": CSRF_TOKEN, "Content-Type": "application/json" },
+          body: JSON.stringify({ items }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          applyStatus.style.color = "#16a34a";
+          applyStatus.textContent = `✓ ${data.applied}건 적용 완료`;
+          previewResults = [];
+          setTimeout(() => { previewWrap.style.display = "none"; }, 2500);
+        } else {
+          applyStatus.style.color = "#dc2626";
+          applyStatus.textContent = "오류: " + (data.error || "알 수 없는 오류");
+        }
+      } catch (e) {
+        applyStatus.style.color = "#dc2626";
+        applyStatus.textContent = "서버 연결 실패";
+      } finally {
+        btnApply.disabled = false;
+        btnCancel.disabled = false;
+      }
+    });
+  })();
 
   // ── 연도 추출 섹션 ───────────────────────────────────────────
   createStreamHandler({
