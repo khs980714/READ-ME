@@ -19,6 +19,7 @@
 | `book_list_categories` | book_list ↔ categories 다대다 |
 | `books` | 도서 코드 레지스트리 — book_code(`D-NNN`) + book_list_id FK |
 | `book_embeddings` | 도서 설명 벡터 임베딩 (pgvector, dim=1024, book_list 단위) |
+| `yes24_candidates` | YES24 검색 1차 수집 결과 — 사용자가 선택 전까지 임시 저장 |
 | `chat_sessions` | 챗봇 세션 (UUID, 비로그인 지원) |
 | `chat_messages` | 챗봇 대화 메시지 |
 | `chat_recommendations` | 챗봇 응답에서 추천된 도서 + 유사도 점수 |
@@ -86,6 +87,7 @@ CREATE TYPE difficulty_level AS ENUM ('입문', '초급', '중급', '고급');
 CREATE TABLE book_list (
     id                  SERIAL              PRIMARY KEY,
     title               VARCHAR(500)        NOT NULL,
+    subtitle            VARCHAR(500)        NOT NULL DEFAULT '',
     edition             VARCHAR(200)        NOT NULL DEFAULT '',
     publication_year    SMALLINT,
     author_id           INT                 NOT NULL REFERENCES authors(id)    ON DELETE RESTRICT,
@@ -93,19 +95,22 @@ CREATE TABLE book_list (
     description         TEXT                NOT NULL DEFAULT '',
     toc                 TEXT                NOT NULL DEFAULT '',
     difficulty          difficulty_level,
-    isbn                VARCHAR(20)         NOT NULL DEFAULT '',
     thumbnail_url       TEXT                NOT NULL DEFAULT '',
+    thumbnail           VARCHAR(500)        NOT NULL DEFAULT '',    -- 로컬 저장 파일 경로
     created_at          TIMESTAMPTZ         NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ         NOT NULL DEFAULT NOW(),
     UNIQUE (title, edition, author_id, publisher_id)
 );
 
 COMMENT ON TABLE  book_list                     IS '도서 정보 마스터 — (title, edition, author, publisher) 조합으로 중복 방지';
+COMMENT ON COLUMN book_list.subtitle            IS '부제 — 제목과 별도로 저장';
 COMMENT ON COLUMN book_list.edition             IS '판차 정보 — 제목에서 분리. 예: (개정2판), (심화편)';
 COMMENT ON COLUMN book_list.publication_year    IS '출판 연도 — 제목 또는 설명에서 자동 추출한 4자리 연도';
 COMMENT ON COLUMN book_list.description         IS '도서 소개 (최대 2,000자)';
 COMMENT ON COLUMN book_list.toc                 IS '목차 (최대 3,000자)';
 COMMENT ON COLUMN book_list.difficulty          IS 'LLM이 도서 설명 기반으로 분류한 난이도';
+COMMENT ON COLUMN book_list.thumbnail_url       IS '표지 이미지 원본 소스 URL';
+COMMENT ON COLUMN book_list.thumbnail           IS '로컬 볼륨에 저장된 썸네일 파일 경로 (우선 표시)';
 
 -- updated_at 자동 갱신 트리거
 CREATE OR REPLACE FUNCTION set_updated_at()
@@ -179,7 +184,24 @@ CREATE INDEX idx_book_embeddings_hnsw
 
 
 -- ============================================================
--- 8. chat_sessions
+-- 8. yes24_candidates  (YES24 검색 후보 임시 저장)
+-- ============================================================
+CREATE TABLE yes24_candidates (
+    id              SERIAL          PRIMARY KEY,
+    book_list_id    INT             NOT NULL REFERENCES book_list(id) ON DELETE CASCADE,
+    title           VARCHAR(500)    NOT NULL,
+    subtitle        VARCHAR(500)    NOT NULL DEFAULT '',
+    href            VARCHAR(1000)   NOT NULL,   -- YES24 상세 페이지 URL
+    edition_info    VARCHAR(200)    NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE  yes24_candidates          IS 'YES24 검색 1차 수집 후보 — 관리자가 선택하면 book_list 덮어쓰기, 그 전까지 임시 보관';
+COMMENT ON COLUMN yes24_candidates.href     IS 'YES24 도서 상세 페이지 URL (상세 수집 시 사용)';
+
+
+-- ============================================================
+-- 9. chat_sessions
 -- ============================================================
 CREATE TABLE chat_sessions (
     id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -191,10 +213,17 @@ COMMENT ON TABLE chat_sessions IS '챗봇 세션 (비로그인 사용자는 UUID
 
 
 -- ============================================================
--- 9. chat_messages
+-- 10. chat_messages
 -- ============================================================
 CREATE TYPE message_role  AS ENUM ('user', 'assistant');
-CREATE TYPE question_type AS ENUM ('roadmap', 'level_based', 'general', 'unrelated');
+CREATE TYPE question_type AS ENUM (
+    'keyword_search',
+    'specific_search',
+    'goal_oriented',
+    'career_certification',
+    'level_based',
+    'out_of_scope'
+);
 
 CREATE TABLE chat_messages (
     id              SERIAL          PRIMARY KEY,
@@ -206,13 +235,13 @@ CREATE TABLE chat_messages (
 );
 
 COMMENT ON TABLE  chat_messages               IS '챗봇 대화 메시지';
-COMMENT ON COLUMN chat_messages.question_type IS 'roadmap | level_based | general | unrelated';
+COMMENT ON COLUMN chat_messages.question_type IS 'keyword_search | specific_search | goal_oriented | career_certification | level_based | out_of_scope';
 
 CREATE INDEX idx_chat_messages_session ON chat_messages(session_id, created_at);
 
 
 -- ============================================================
--- 10. chat_recommendations
+-- 11. chat_recommendations
 -- ============================================================
 CREATE TABLE chat_recommendations (
     id                  SERIAL      PRIMARY KEY,
@@ -245,7 +274,9 @@ CREATE INDEX idx_chat_rec_message ON chat_recommendations(message_id, rank);
 | 저자 | 단일 FK (`author_id`) | CSV 구조상 대표 저자 1인으로 단순화 |
 | 출판사 | 별도 테이블 (`publishers`) | 중복 데이터 방지 |
 | 카테고리 | LLM 자동 분류 (1~3개) | 도서 제목+설명을 NVIDIA NIM에 입력하여 12개 카테고리 중 분류 |
-| 난이도 | `difficulty_level` ENUM | 도서 설명 기반 LLM 분류 — `입문/초급/중급/고급` |
+| 난이도 | `difficulty_level` ENUM | 도서 설명 기반 LLM 분류 — `입문/초급/중급/고급`. 분류 결과는 미리보기 후 선택적으로 DB 반영 |
+| YES24 후보 | `yes24_candidates` 임시 테이블 | 검색 결과를 먼저 저장하고 관리자가 선택 후 `book_list` 덮어쓰기. 선택 또는 건너뜀 시 후보 삭제 |
+| 썸네일 | `thumbnail_url` + `thumbnail` 분리 | 원본 소스 URL과 로컬 저장 파일 경로를 별도 관리. 표시 시 로컬 파일 우선 |
 | 임베딩 | `book_list` 단위 (OneToOne) | 동일 도서의 중복 임베딩 방지, HNSW 인덱스로 코사인 유사도 검색 |
 | 챗봇 세션 | UUID 기반 | 비로그인 사용자도 대화 맥락 유지 |
 | 추천 카드 | `similarity_score` 저장 | threshold 재조정 시 DB 재활용 가능 |

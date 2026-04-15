@@ -91,8 +91,11 @@ READ-ME/
 ├── infra/
 │   └── init.sql              # PostgreSQL 초기화 (pgvector 확장 활성화)
 ├── docs/
+│   ├── architecture.md       # 시스템 아키텍처 다이어그램 (Mermaid)
+│   ├── erd.md                # ERD (Mermaid)
 │   ├── schema.md             # DB DDL 및 설계 결정
-│   └── erd.md                # ERD (Mermaid)
+│   ├── chain.md              # LangChain 체인 분기 구조 (Mermaid)
+│   └── api.md                # API 엔드포인트 명세
 ├── data.csv                  # 초기 도서 데이터
 ├── docker-compose.yml
 ├── Dockerfile.django_server
@@ -105,8 +108,11 @@ READ-ME/
 
 ## DB 설계
 
-- [스키마 상세 (DDL)](docs/schema.md)
+- [아키텍처 다이어그램](docs/architecture.md)
 - [ERD](docs/erd.md)
+- [스키마 상세 (DDL)](docs/schema.md)
+- [LangChain 체인 구조](docs/chain.md)
+- [API 명세](docs/api.md)
 
 ### 핵심 테이블
 
@@ -119,6 +125,7 @@ READ-ME/
 | `book_list_categories` | book_list ↔ categories 다대다 |
 | `books` | 도서 코드 레지스트리 — book_code(`D-NNN`) + book_list_id FK |
 | `book_embeddings` | pgvector 임베딩 (dim=1024, book_list 단위) |
+| `yes24_candidates` | YES24 검색 후보 임시 저장 — 관리자 선택 후 book_list 덮어쓰기 |
 | `chat_sessions` | 챗봇 세션 (UUID, 비로그인 지원) |
 | `chat_messages` | 대화 메시지 및 질문 유형 |
 | `chat_recommendations` | 응답 추천 도서 + 유사도 점수 |
@@ -128,12 +135,14 @@ READ-ME/
 | 컬럼 | 설명 |
 |---|---|
 | `title` | 판차 제거 후 정제된 도서명 |
+| `subtitle` | 부제 |
 | `edition` | 판차 정보 (`(개정2판)`, `(심화편)` 등, 제목에서 분리) |
 | `publication_year` | 출판 연도 (제목·설명에서 자동 추출, 4자리) |
 | `description` | 도서 소개 (최대 2,000자) |
 | `toc` | 목차 (최대 3,000자) |
 | `difficulty` | 난이도 (`입문` / `초급` / `중급` / `고급`) |
-| `thumbnail_url` | 표지 이미지 URL |
+| `thumbnail_url` | 표지 이미지 원본 소스 URL |
+| `thumbnail` | 로컬 저장 썸네일 파일 경로 (표시 시 우선 사용) |
 
 ### 중복 수집 방지 로직
 
@@ -201,7 +210,7 @@ LLM(NVIDIA NIM)이 도서 제목과 설명을 분석하여 아래 12개 카테�
 |---|---|
 | 전체 수집 | 설명·목차·ISBN·썸네일 → 난이도 분류 → 임베딩 순으로 일괄 처리 |
 | 임베딩 누락 보정 | description 있으나 임베딩 없는 도서만 재처리 |
-| 난이도 분류 | difficulty 미분류 도서만 LLM으로 재분류 |
+| 난이도 분류 | 설명 있는 전체 도서를 LLM으로 재분류. 결과 미리보기 후 선택적으로 DB 반영 |
 | 출판 연도 추출 | publication_year 미등록 도서의 연도 자동 추출 |
 | 카테고리 분류 | categories 미태깅 도서만 LLM으로 카테고리 자동 분류 |
 

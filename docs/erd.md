@@ -30,6 +30,7 @@ erDiagram
     book_list {
         int      id                  PK
         varchar  title                   "판차 제거 정제 제목"
+        varchar  subtitle                "부제 (있는 경우)"
         varchar  edition                 "(개정2판) 등 분리된 판차"
         smallint publication_year        "제목·설명에서 추출한 연도"
         int      author_id          FK   "대표 저자"
@@ -37,8 +38,8 @@ erDiagram
         text     description             "도서 소개 (max 2,000자)"
         text     toc                     "목차 (max 3,000자)"
         enum     difficulty              "입문|초급|중급|고급"
-        varchar  isbn
-        text     thumbnail_url
+        text     thumbnail_url           "표지 이미지 원본 URL"
+        varchar  thumbnail               "로컬 저장 썸네일 파일 경로"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -60,9 +61,19 @@ erDiagram
     book_embeddings {
         int     id              PK
         int     book_list_id    UK,FK  "book_list 단위 중복 방지"
-        vector  embedding           "dim=1024 (NVIDIA nv-embedqa-e5-v5)"
+        vector  embedding              "dim=1024 (NVIDIA nv-embedqa-e5-v5)"
         timestamptz created_at
         timestamptz updated_at
+    }
+
+    yes24_candidates {
+        int     id              PK
+        int     book_list_id    FK     "연결된 도서 정보"
+        varchar title                  "YES24 검색 결과 도서명"
+        varchar subtitle               "부제"
+        url     href                   "YES24 상세 페이지 URL"
+        varchar edition_info           "개정판 정보"
+        timestamptz created_at
     }
 
     %% ── 챗봇 도메인 ──────────────────────────────────────────
@@ -78,7 +89,7 @@ erDiagram
         uuid    session_id      FK
         enum    role                "user|assistant"
         text    content
-        enum    question_type       "roadmap|level_based|general|unrelated"
+        enum    question_type       "keyword_search|specific_search|goal_oriented|career_certification|level_based|out_of_scope"
         timestamptz created_at
     }
 
@@ -99,6 +110,7 @@ erDiagram
     categories      ||--o{ book_list_categories : "분류"
     book_list       ||--o{ books               : "코드 등록"
     book_list       ||--|| book_embeddings      : "임베딩"
+    book_list       ||--o{ yes24_candidates    : "후보"
     chat_sessions   ||--o{ chat_messages        : "포함"
     chat_messages   ||--o{ chat_recommendations : "추천"
     books           ||--o{ chat_recommendations : "추천됨"
@@ -109,14 +121,15 @@ erDiagram
 ## 관계 요약
 
 ```
-publishers (1) ──── (N) book_list
-authors    (1) ──── (N) book_list    [ 대표 저자 단일 FK ]
-categories (M) ──── (N) book_list   [ book_list_categories 경유 ]
-book_list  (1) ──── (N) books        [ 동일 책의 다수 코드 지원, 중복 수집 방지 ]
-book_list  (1) ──── (1) book_embeddings
-chat_sessions (1) ── (N) chat_messages
-chat_messages (1) ── (N) chat_recommendations
-books       (1) ──── (N) chat_recommendations
+publishers  (1) ──── (N) book_list
+authors     (1) ──── (N) book_list   [ 대표 저자 단일 FK ]
+categories  (M) ──── (N) book_list   [ book_list_categories 경유 ]
+book_list   (1) ──── (N) books        [ 동일 책의 다수 코드 지원, 중복 수집 방지 ]
+book_list   (1) ──── (1) book_embeddings
+book_list   (1) ──── (N) yes24_candidates  [ YES24 검색 후보 임시 저장 ]
+chat_sessions  (1) ── (N) chat_messages
+chat_messages  (1) ── (N) chat_recommendations
+books        (1) ──── (N) chat_recommendations
 ```
 
 ---
@@ -133,15 +146,16 @@ books       (1) ──── (N) chat_recommendations
      → books 생성 (book_code D-NNN, book_list_id FK)
         │
         ▼
-   run_pipeline (BookList 단위, 이미 수집된 필드 건너뜀)
+   run_pipeline (BookList 단위)
         │
         ├──① 멀티소스 정보 수집
-        │     알라딘 API (TTB) ──► description, toc, isbn, thumbnail_url
-        │     YES24 스크래핑   ──► 누락 필드 보완
-        │     교보문고 스크래핑 ──► 누락 필드 보완
+        │     알라딘 API (TTB)   ──► description, toc, thumbnail_url
+        │     YES24 스크래핑    ──► 누락 필드 보완
+        │     교보문고 스크래핑  ──► 누락 필드 보완
         │
         ├──② LLM 난이도 분류 (NVIDIA NIM)
         │     title + description ──► difficulty (입문/초급/중급/고급)
+        │     ※ 분류 결과는 미리보기 후 선택적으로 DB 반영
         │
         └──③ 임베딩 생성 (NVIDIA nv-embedqa-e5-v5)
               title + description ──► VECTOR(1024) ──► book_embeddings upsert
@@ -149,7 +163,7 @@ books       (1) ──── (N) chat_recommendations
 [별도 파이프라인]
    출판 연도 추출:    title / description ──► publication_year
    카테고리 분류:    title + description ──► LLM ──► book_list_categories (1~3개)
-
+   YES24 후보 수집:  검색 결과 ──► yes24_candidates ──► 수동 선택 후 book_list 갱신
 
 [사용자 챗봇 질문]
         │
@@ -162,10 +176,12 @@ books       (1) ──── (N) chat_recommendations
         ▼
    FastAPI(LangChain) ──► 질문 분류(question_type)
         │
-        ├── roadmap     ──► 단계별 로드맵 + 도서 추천
-        ├── level_based ──► 수준별 도서 추천
-        ├── general     ──► 도서 관련 일반 답변 + 추천
-        └── unrelated   ──► "도서와 관련없는 질문입니다."
+        ├── keyword_search       ──► ILIKE DB 검색 (LLM 없음)
+        ├── specific_search      ──► 벡터 검색 + specific_search_chain
+        ├── goal_oriented        ──► 벡터 검색 + goal_oriented_chain
+        ├── career_certification ──► 벡터 검색 + 후처리 필터 + career_certification_chain
+        ├── level_based          ──► 난이도 필터 벡터 검색 + level_based_chain
+        └── out_of_scope         ──► "IT·개발 도서 챗봇 안내" 반환 (DB 검색 없음)
                 │
                 ▼
    pgvector 코사인 유사도 검색 ──► similarity_score ≥ threshold
