@@ -114,6 +114,7 @@ def book_add(request):
         form_data = request.POST
         book_code = request.POST.get("book_code", "").strip()
         title = request.POST.get("title", "").strip()
+        subtitle = request.POST.get("subtitle", "").strip()
         edition = request.POST.get("edition", "").strip()
         author_name = request.POST.get("author", "").strip()
         publisher_name = request.POST.get("publisher", "").strip()
@@ -138,6 +139,7 @@ def book_add(request):
                     author=author,
                     publisher=publisher,
                     defaults={
+                        "subtitle": subtitle,
                         "difficulty": difficulty,
                         "publication_year": publication_year,
                         "thumbnail_url": thumbnail_url,
@@ -147,6 +149,7 @@ def book_add(request):
                 )
                 if not created:
                     # 같은 (title, edition, author, publisher)가 있으면 수집 정보만 갱신
+                    book_list.subtitle = subtitle
                     book_list.edition = edition
                     book_list.difficulty = difficulty
                     book_list.publication_year = publication_year
@@ -161,6 +164,11 @@ def book_add(request):
                     book_list=book_list,
                     is_active=is_active,
                 )
+                # 썸네일 URL이 있으면 즉시 다운로드
+                if thumbnail_url and not book_list.thumbnail:
+                    from .services import _save_thumbnail
+                    if _save_thumbnail(book_list, thumbnail_url):
+                        book_list.save(update_fields=["thumbnail"])
                 messages.success(request, f"도서 [{book_code}] {title} 이(가) 추가되었습니다.")
                 return redirect("books:manage")
             except IntegrityError:
@@ -193,6 +201,7 @@ def book_edit(request, pk):
     error = None
     form_data = {
         "title": book_list.title,
+        "subtitle": book_list.subtitle,
         "edition": book_list.edition,
         "author": book_list.author.name,
         "publisher": book_list.publisher.name,
@@ -206,6 +215,7 @@ def book_edit(request, pk):
     if request.method == "POST":
         form_data = request.POST
         title = request.POST.get("title", "").strip()
+        subtitle = request.POST.get("subtitle", "").strip()
         edition = request.POST.get("edition", "").strip()
         author_name = request.POST.get("author", "").strip()
         publisher_name = request.POST.get("publisher", "").strip()
@@ -222,13 +232,16 @@ def book_edit(request, pk):
             error = "도서명, 저자, 출판사는 필수 항목입니다."
         else:
             try:
-                # 변경 전 값 스냅샷 — 임베딩 재생성 여부 판단용
-                prev_title       = book_list.title
-                prev_description = book_list.description
+                from .services import _save_thumbnail
+                # 변경 전 값 스냅샷 — 임베딩 재생성·썸네일 갱신 여부 판단용
+                prev_title         = book_list.title
+                prev_description   = book_list.description
+                prev_thumbnail_url = book_list.thumbnail_url
 
                 author, _ = Author.objects.get_or_create(name=author_name)
                 publisher, _ = Publisher.objects.get_or_create(name=publisher_name)
                 book_list.title = title
+                book_list.subtitle = subtitle
                 book_list.edition = edition
                 book_list.author = author
                 book_list.publisher = publisher
@@ -241,6 +254,13 @@ def book_edit(request, pk):
                 book_list.categories.set(Category.objects.filter(id__in=category_ids))
                 book.is_active = is_active
                 book.save()
+
+                # 썸네일 URL이 변경됐으면 기존 파일 삭제 후 재다운로드
+                if thumbnail_url and thumbnail_url != prev_thumbnail_url:
+                    if book_list.thumbnail:
+                        book_list.thumbnail.delete(save=False)
+                    if _save_thumbnail(book_list, thumbnail_url):
+                        book_list.save(update_fields=["thumbnail"])
 
                 # 제목 또는 설명이 바뀌고 설명이 있으면 임베딩 재생성
                 needs_reembed = (

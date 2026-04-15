@@ -57,6 +57,7 @@ class BookList(models.Model):
         ADVANCED = "고급", "고급"
 
     title = models.CharField(max_length=500, verbose_name="도서명")
+    subtitle = models.CharField(max_length=500, blank=True, verbose_name="부제")
     edition = models.CharField(max_length=200, blank=True, verbose_name="판차",
                                help_text="예: (개정2판), (심화편) — 제목에서 분리된 판차 정보")
     publication_year = models.PositiveSmallIntegerField(
@@ -79,7 +80,10 @@ class BookList(models.Model):
     difficulty = models.CharField(
         max_length=10, choices=Difficulty.choices, blank=True, verbose_name="난이도"
     )
-    thumbnail_url = models.URLField(max_length=500, blank=True, verbose_name="썸네일 URL")
+    thumbnail_url = models.URLField(max_length=500, blank=True, verbose_name="썸네일 원본 URL",
+                                    help_text="수집 소스 URL — 표시에는 thumbnail 필드를 우선 사용")
+    thumbnail = models.ImageField(upload_to="thumbnails/", blank=True, verbose_name="썸네일 이미지",
+                                  help_text="저장된 썸네일 파일 (로컬 볼륨 또는 R2)")
     toc = models.TextField(blank=True, verbose_name="목차")
     categories = models.ManyToManyField(
         Category,
@@ -116,6 +120,12 @@ class BookList(models.Model):
 
     def get_author_display(self):
         return self.author.name
+
+    def get_thumbnail_url(self) -> str:
+        """저장된 이미지가 있으면 그 URL, 없으면 원본 소스 URL 반환."""
+        if self.thumbnail:
+            return self.thumbnail.url
+        return self.thumbnail_url
 
 
 class BookListCategory(models.Model):
@@ -180,7 +190,7 @@ class Book(models.Model):
 
     @property
     def thumbnail_url(self):
-        return self.book_list.thumbnail_url
+        return self.book_list.get_thumbnail_url()
 
     @property
     def toc(self):
@@ -189,6 +199,31 @@ class Book(models.Model):
     @property
     def categories(self):
         return self.book_list.categories
+
+
+class YES24Candidate(models.Model):
+    """YES24 검색 1차 수집 결과 — 사용자가 선택 전까지 임시 저장."""
+
+    book_list = models.ForeignKey(
+        BookList,
+        on_delete=models.CASCADE,
+        related_name="yes24_candidates",
+        verbose_name="도서 정보",
+    )
+    title      = models.CharField(max_length=500, verbose_name="도서명")
+    subtitle   = models.CharField(max_length=500, blank=True, verbose_name="부제")
+    href       = models.URLField(max_length=1000, verbose_name="YES24 링크")
+    edition_info = models.CharField(max_length=200, blank=True, verbose_name="개정 정보")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "yes24_candidates"
+        verbose_name = "YES24 후보 도서"
+        verbose_name_plural = "YES24 후보 도서"
+        ordering = ["book_list", "created_at"]
+
+    def __str__(self):
+        return f"{self.title} ({self.book_list})"
 
 
 class BookEmbedding(models.Model):

@@ -8,16 +8,44 @@
 """
 
 import logging
+import posixpath
 import re
 import time
 import urllib.parse
+from urllib.parse import urlparse
 
 import httpx
 import requests
 from bs4 import BeautifulSoup
 from django.conf import settings
+from django.core.files.base import ContentFile
 
 logger = logging.getLogger(__name__)
+
+
+def _save_thumbnail(book_list, url: str) -> bool:
+    """URL에서 이미지를 다운로드하여 book_list.thumbnail 필드에 저장합니다.
+
+    저장만 수행하고 model.save()는 호출하지 않습니다 — 호출 측에서 update_fields에
+    'thumbnail'을 포함하여 저장하세요.
+    """
+    if not url:
+        return False
+    try:
+        resp = requests.get(
+            url, timeout=10,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; ReadMe-Bot/1.0)"},
+        )
+        resp.raise_for_status()
+        ext = posixpath.splitext(urlparse(url).path)[1].lower()
+        if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+            ext = ".jpg"
+        filename = f"{book_list.pk}{ext}"
+        book_list.thumbnail.save(filename, ContentFile(resp.content), save=False)
+        return True
+    except Exception as exc:
+        logger.warning("썸네일 다운로드 실패 (book_list_id=%s): %s", book_list.pk, exc)
+        return False
 
 # ── 판차 / 연도 패턴 ──────────────────────────────────────────
 
@@ -317,6 +345,187 @@ def fetch_kyobo_book_info(title: str) -> dict | None:
         return None
 
 
+# ── YES24 1차 검색 (후보 수집) ────────────────────────────────
+
+def fetch_yes24_candidates(title: str) -> list[dict]:
+    """YES24 검색 결과에서 후보 도서 목록 수집 (1차).
+
+    수집 항목: 도서명(gd_name), 링크(href), 부제(gd_nameE), 개정 정보(feature)
+    """
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        search_url = (
+            "https://www.yes24.com/Product/Search"
+            f"?query={urllib.parse.quote(_normalize_title(title))}&domain=BOOK"
+        )
+        resp = requests.get(search_url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        candidates = []
+        for name_tag in soup.select("a.gd_name")[:10]:
+            raw_href = name_tag.get("href", "")
+            if not raw_href:
+                continue
+            href = (
+                "https://www.yes24.com" + raw_href
+                if raw_href.startswith("/")
+                else raw_href
+            )
+            title_text = name_tag.get_text(strip=True)
+
+            # 부모 컨테이너에서 부제·개정 정보 탐색
+            container = name_tag.parent
+            for _ in range(6):
+                if container is None:
+                    break
+                if container.select_one(".gd_nameE") or container.select_one(".feature"):
+                    break
+                container = container.parent
+
+            subtitle = ""
+            edition_info = ""
+            if container:
+                sub_tag  = container.select_one(".gd_nameE")
+                feat_tag = container.select_one(".feature")
+                if sub_tag:
+                    subtitle = sub_tag.get_text(strip=True)
+                if feat_tag:
+                    edition_info = feat_tag.get_text(strip=True)
+
+            if title_text and href:
+                candidates.append({
+                    "title":        title_text,
+                    "href":         href,
+                    "subtitle":     subtitle,
+                    "edition_info": edition_info,
+                })
+
+        return candidates
+    except Exception as exc:
+        logger.warning("YES24 후보 수집 실패 (%s): %s", title, exc)
+        return []
+
+
+# ── YES24 2차 상세 수집 ───────────────────────────────────────
+
+def _clean_yes24_text(tag, max_chars: int | None = None) -> str:
+    """YES24 콘텐츠 영역에서 순수 텍스트를 추출합니다.
+
+    - 버튼/링크 등 UI 요소 제거
+    - br 태그 → 개행 변환
+    - 이중 HTML 인코딩(텍스트 안에 <b>, <br/> 등) 처리
+    - '미리보기', '펼쳐보기', '접기' UI 잔여 문자 제거
+    """
+    import re as _re
+
+    # UI 요소 제거 (버튼, 더보기 링크 등)
+    for el in tag.select("button, .moreBtn, .btnWrap, .more_btn, a.btn_more, .infoSetBtn"):
+        el.decompose()
+
+    # <br> → 개행
+    for br in tag.find_all("br"):
+        br.replace_with("\n")
+
+    raw = tag.get_text(separator="\n", strip=True)
+
+    # YES24는 콘텐츠를 HTML 엔티티로 이중 인코딩하는 경우가 있어
+    # get_text() 후에도 <b>, <br/> 등의 태그 문자가 남을 수 있음 → 재파싱
+    if "<" in raw and ">" in raw:
+        inner = BeautifulSoup(raw, "html.parser")
+        for br in inner.find_all("br"):
+            br.replace_with("\n")
+        raw = inner.get_text(separator="\n", strip=True)
+
+    # UI 잔여 텍스트 제거 (줄 단위 및 인라인)
+    raw = _re.sub(r'(?m)^\s*(미리보기|펼쳐보기|접기)\s*$', '', raw)
+    raw = _re.sub(r'\s*(미리보기|펼쳐보기|접기)\s*', ' ', raw)
+    raw = _re.sub(r'(?m)^\s*책의 일부 내용을 미리 읽어보실 수 있습니다\.?\s*$', '', raw)
+
+    # 연속 공백·개행 정리
+    raw = _re.sub(r'[ \t]+', ' ', raw)
+    raw = _re.sub(r'\n{3,}', '\n\n', raw)
+    raw = raw.strip()
+
+    if max_chars:
+        raw = raw[:max_chars]
+    return raw
+
+
+def fetch_yes24_book_detail(href: str) -> dict | None:
+    """YES24 도서 상세 페이지에서 전체 정보 수집 (2차).
+
+    수집 항목: 썸네일, 도서명, 부제, 저자, 출판사, 개정 정보, 설명, 목차
+    '펼쳐보기' 상태의 전체 내용(infoSetContAll)을 우선 수집합니다.
+    """
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        resp = requests.get(href, headers=headers, timeout=15)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        result: dict = {}
+
+        # 썸네일
+        thumb_tag = soup.select_one(".gd_img img")
+        if thumb_tag and thumb_tag.get("src"):
+            result["thumbnail_url"] = thumb_tag["src"]
+
+        # 도서명
+        title_tag = soup.select_one("h2.gd_name") or soup.select_one(".gd_name")
+        if title_tag:
+            result["title"] = title_tag.get_text(strip=True)
+
+        # 부제
+        subtitle_tag = soup.select_one(".gd_nameE")
+        if subtitle_tag:
+            subtitle_text = subtitle_tag.get_text(strip=True)
+            if subtitle_text:
+                result["subtitle"] = subtitle_text
+
+        # 저자
+        auth_tag = soup.select_one(".gd_auth")
+        if auth_tag:
+            result["author"] = auth_tag.get_text(separator=" ", strip=True)
+
+        # 출판사
+        pub_tag = soup.select_one(".gd_pub")
+        if pub_tag:
+            result["publisher"] = pub_tag.get_text(strip=True)
+
+        # 개정 정보
+        feat_tag = soup.select_one(".feature")
+        if feat_tag:
+            result["edition_info"] = feat_tag.get_text(strip=True)
+
+        # 도서 소개 — 펼쳐보기 전체 내용(infoSetContAll) 우선, 없으면 기본 영역
+        intro_wrap = soup.select_one("#infoset_introduce .infoSetCont_wrap")
+        if not intro_wrap:
+            intro_wrap = soup.select_one(".Wrrapper.infoSetCont_wrap")
+        if intro_wrap:
+            full_el = intro_wrap.select_one(".infoSetContAll") or intro_wrap.select_one(".infoSetCont")
+            target = full_el if full_el else intro_wrap
+            text = _clean_yes24_text(target, max_chars=2000)
+            if text:
+                result["description"] = text
+
+        # 목차 — 펼쳐보기 전체 내용 우선
+        toc_wrap = soup.select_one("#infoset_toc .infoSetCont_wrap")
+        if not toc_wrap:
+            toc_wrap = soup.select_one("#infoset_toc")
+        if toc_wrap:
+            full_el = toc_wrap.select_one(".infoSetContAll") or toc_wrap.select_one(".infoSetCont")
+            target = full_el if full_el else toc_wrap
+            text = _clean_yes24_text(target, max_chars=3000)
+            if text:
+                result["toc"] = text
+
+        return result if result else None
+    except Exception as exc:
+        logger.warning("YES24 상세 수집 실패 (%s): %s", href, exc)
+        return None
+
+
 # ── 멀티소스 통합 수집 ────────────────────────────────────────
 
 def fetch_book_info_with_fallback(
@@ -488,6 +697,12 @@ def run_booklist_pipeline(
             book_list.toc = info["toc"]
             update_fields.append("toc")
 
+    # 썸네일 이미지 저장 — URL은 있지만 저장된 파일이 없는 경우
+    if book_list.thumbnail_url and not book_list.thumbnail:
+        _log("썸네일 이미지 저장 중...")
+        if _save_thumbnail(book_list, book_list.thumbnail_url):
+            update_fields.append("thumbnail")
+
     # 2) 난이도 분류 — difficulty가 없고 description이 있을 때만 실행
     if not book_list.difficulty and book_list.description:
         _log("난이도 분류 중...")
@@ -542,6 +757,11 @@ def collect_book_data(book_list, force: bool = False) -> dict:
     if info.get("toc") and (force or not book_list.toc):
         book_list.toc = info["toc"]
         update_fields.append("toc")
+
+    # 썸네일 이미지 저장 — URL은 있지만 저장된 파일이 없는 경우 (force 시 재다운로드)
+    if book_list.thumbnail_url and (force or not book_list.thumbnail):
+        if _save_thumbnail(book_list, book_list.thumbnail_url):
+            update_fields.append("thumbnail")
 
     if update_fields:
         book_list.save(update_fields=update_fields)
