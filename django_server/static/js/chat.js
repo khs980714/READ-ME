@@ -418,12 +418,6 @@ function makeGroupCard(group, allGroups) {
     badge.textContent = rep.difficulty;
     meta.appendChild(badge);
   }
-  if (rep.score != null) {
-    const scoreEl = document.createElement("span");
-    scoreEl.className = "rec-card-score";
-    scoreEl.textContent = `유사도 ${Math.round(rep.score * 100)}%`;
-    meta.appendChild(scoreEl);
-  }
   // 판차 뱃지 (복수 edition)
   if (editions.length > 1) {
     const edBadge = document.createElement("span");
@@ -563,12 +557,6 @@ function renderModalDetail(group) {
     b.className = `badge badge--${rep.difficulty}`;
     b.textContent = rep.difficulty;
     metaBadges.appendChild(b);
-  }
-  if (rep.score != null) {
-    const s = document.createElement("span");
-    s.className = "rec-card-score";
-    s.textContent = `유사도 ${Math.round(rep.score * 100)}%`;
-    metaBadges.appendChild(s);
   }
 
   meta.appendChild(metaTitle);
