@@ -37,11 +37,17 @@ class Command(BaseCommand):
 
         ok = fail = 0
         for bl in qs.iterator():
+            # 기존 파일 삭제 후 재다운로드 (덮어쓰기 보장, 중복 파일 방지)
+            if bl.thumbnail:
+                bl.thumbnail.delete(save=False)
             if _save_thumbnail(bl, bl.thumbnail_url):
                 bl.save(update_fields=["thumbnail"])
                 ok += 1
                 self.stdout.write(f"  ✓ [{bl.pk}] {bl.title}")
             else:
+                # 다운로드 실패 + 파일이 삭제된 경우 DB도 비워서 일치
+                if not bl.thumbnail.name:
+                    bl.save(update_fields=["thumbnail"])
                 fail += 1
                 self.stdout.write(
                     self.style.WARNING(f"  ✗ [{bl.pk}] {bl.title} — 다운로드 실패")

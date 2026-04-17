@@ -184,6 +184,7 @@
     padding: 60px 20px;
     color: var(--text-muted);
   }
+
 </style>
 {% endblock %}
 
@@ -232,14 +233,13 @@
   <table class="manage-table">
     <colgroup>
       <col style="width:90px">   <!-- 코드 -->
-      <col>                      <!-- 도서명: 나머지 공간 -->
+      <col>                      <!-- 도서명 -->
       <col style="width:117px">  <!-- 저자 -->
       <col style="width:117px">  <!-- 출판사 -->
       <col style="width:72px">   <!-- 난이도 -->
       <col style="width:96px">   <!-- 수집 -->
       <col style="width:60px">   <!-- 상태 -->
       <col style="width:80px">   <!-- 작업 -->
-      <col style="width:90px">   <!-- 데이터 수집 -->
     </colgroup>
     <thead>
       <tr>
@@ -251,7 +251,6 @@
         <th>수집</th>
         <th>상태</th>
         <th>작업</th>
-        <th>데이터 수집</th>
       </tr>
     </thead>
     <tbody>
@@ -296,74 +295,13 @@
             </form>
           </div>
         </td>
-        <td>
-          <div class="action-group">
-            <button type="button"
-                    class="btn-table-collect"
-                    data-pk="{{ book.pk }}"
-                    data-url="{% url 'books:collect' book.pk %}">
-              수집
-            </button>
-            <div class="collect-result" id="collect-result-{{ book.pk }}"></div>
-          </div>
-        </td>
       </tr>
       {% empty %}
       <tr class="empty-row">
-        <td colspan="9">등록된 도서가 없습니다.</td>
+        <td colspan="8">등록된 도서가 없습니다.</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
-{% endblock %}
-
-{% block extra_js %}
-<script>
-const CSRF_TOKEN = "{{ csrf_token }}";
-
-document.querySelectorAll(".btn-table-collect").forEach(btn => {
-  btn.addEventListener("click", async () => {
-    const pk     = btn.dataset.pk;
-    const url    = btn.dataset.url;
-    const result = document.getElementById(`collect-result-${pk}`);
-    const badges = document.getElementById(`collect-badges-${pk}`);
-
-    btn.disabled = true;
-    btn.textContent = "수집 중…";
-    result.textContent = "";
-    result.className = "collect-result";
-
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "X-CSRFToken": CSRF_TOKEN, "Content-Type": "application/json" },
-        body: JSON.stringify({ force: true }),
-      });
-      const data = await res.json();
-
-      if (data.ok) {
-        const labels = ["이미지", "소개", "목차"];
-        const values = [data.thumbnail, data.description, data.toc];
-        const spans  = badges.querySelectorAll(".collect-badge");
-        spans.forEach((span, i) => {
-          span.className = "collect-badge " + (values[i] ? "collect-badge--ok" : "collect-badge--no");
-        });
-        const updated = data.updated_fields?.length ?? 0;
-        result.textContent = updated > 0 ? `✓ ${updated}개 갱신` : "변경 없음";
-        result.className = "collect-result ok";
-      } else {
-        result.textContent = "오류: " + (data.error || "알 수 없는 오류");
-        result.className = "collect-result error";
-      }
-    } catch (e) {
-      result.textContent = "연결 실패";
-      result.className = "collect-result error";
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "수집";
-    }
-  });
-});
-</script>
 {% endblock %}

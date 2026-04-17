@@ -1,5 +1,6 @@
 import json as _json
 import logging
+import re
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -135,6 +136,37 @@ def _get_stream_gen(question_type: str, chain_input: dict):
         return level_based_chain_stream(chain_input)
 
 
+# 도서 코드 패턴: 대문자+숫자 조합 + 하이픈 + 숫자 (예: IT-001, WEB-005, D-042)
+_BOOK_CODE_RE = re.compile(r'\b([A-Z][A-Z0-9]*-\d+)\b')
+
+
+def _reorder_by_mentioned_codes(answer: str, retrieved: list) -> list:
+    """LLM 응답 텍스트에서 처음 언급된 도서 코드 순서로 retrieved를 재정렬.
+
+    언급된 도서를 앞으로, 언급되지 않은 도서는 원래 순서를 유지하며 뒤에 배치.
+    """
+    seen: set[str] = set()
+    mention_order: list[str] = []
+    for m in _BOOK_CODE_RE.finditer(answer):
+        code = m.group(1).upper()
+        if code not in seen:
+            seen.add(code)
+            mention_order.append(code)
+
+    if not mention_order:
+        return retrieved
+
+    order_index = {code: i for i, code in enumerate(mention_order)}
+    upper_to_book = {(b.get("book_code") or "").upper(): b for b in retrieved}
+
+    prioritized = sorted(
+        [b for b in retrieved if (b.get("book_code") or "").upper() in order_index],
+        key=lambda b: order_index[(b.get("book_code") or "").upper()],
+    )
+    rest = [b for b in retrieved if (b.get("book_code") or "").upper() not in order_index]
+    return prioritized + rest
+
+
 def _build_recommendations(retrieved: list) -> list[RecItem]:
     return [
         RecItem(book_list_id=b["book_list_id"], score=b["score"], rank=i + 1)
@@ -167,10 +199,11 @@ async def chat_message(request: Request, req: ChatRequest):
         logger.warning("NVIDIA NIM 429 Rate Limit")
         raise HTTPException(status_code=429, detail=_RATE_LIMIT_MSG)
 
+    reordered = _reorder_by_mentioned_codes(answer, retrieved)
     return ChatResponse(
         answer=answer,
         question_type=question_type,
-        recommendations=_build_recommendations(retrieved),
+        recommendations=_build_recommendations(reordered),
     )
 
 
@@ -200,20 +233,23 @@ async def chat_message_stream(request: Request, req: ChatRequest):
             yield f"data: {_json.dumps({'type': 'done', 'question_type': question_type, 'recommendations': []})}\n\n"
             return
 
-        # 4) 체인 스트리밍
+        # 4) 체인 스트리밍 (응답 누적 후 코드 파싱에 사용)
+        full_answer = ""
         try:
             async for chunk in _get_stream_gen(question_type, chain_input):
                 if chunk:
+                    full_answer += chunk
                     yield f"data: {_json.dumps({'type': 'answer_chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
         except RateLimitError:
             logger.warning("NVIDIA NIM 429 Rate Limit (stream/chain)")
             yield f"data: {_json.dumps({'type': 'error', 'content': _RATE_LIMIT_MSG}, ensure_ascii=False)}\n\n"
             return
 
-        # 5) 완료 + 추천 도서
+        # 5) 완료 + 추천 도서 (LLM이 언급한 코드 순서로 재정렬)
+        reordered = _reorder_by_mentioned_codes(full_answer, retrieved)
         recommendations = [
             {"book_list_id": b["book_list_id"], "score": b["score"], "rank": i + 1}
-            for i, b in enumerate(retrieved)
+            for i, b in enumerate(reordered)
         ]
         yield f"data: {_json.dumps({'type': 'done', 'question_type': question_type, 'recommendations': recommendations})}\n\n"
 

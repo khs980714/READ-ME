@@ -16,7 +16,7 @@
       <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
       </svg>
-      <input type="text" name="q" value="{{ query }}" placeholder="도서명 또는 저자 검색" class="search-input">
+      <input type="text" name="q" value="{{ query }}" placeholder="도서명, 저자, 도서 코드 검색" class="search-input">
     </div>
 
     <div class="filter-controls">
@@ -70,14 +70,18 @@
     </div>
     <div class="book-info">
       <div class="book-meta-top">
+        <span class="book-code">{{ book.book_code }}</span>
         {% if book.difficulty %}
           <span class="badge badge--{{ book.difficulty }}">{{ book.difficulty }}</span>
         {% endif %}
-        {% for cat in book.categories.all|slice:":2" %}
+      </div>
+      {% with cats=book.categories.all %}{% if cats %}
+      <div class="book-meta-top" style="margin-bottom:4px;">
+        {% for cat in cats|slice:":2" %}
           <span class="badge badge--category">{{ cat.name }}</span>
         {% endfor %}
-        <span class="book-code">{{ book.book_code }}</span>
       </div>
+      {% endif %}{% endwith %}
       <h3 class="book-title">{{ book.title }}</h3>
       <p class="book-author">{{ book.get_author_display }}</p>
       <p class="book-publisher">{{ book.publisher.name }}</p>
@@ -104,18 +108,20 @@
     </div>
     <div class="book-list-info">
       <div class="book-meta-top">
+        <span class="book-code">{{ book.book_code }}</span>
         {% if book.difficulty %}
           <span class="badge badge--{{ book.difficulty }}">{{ book.difficulty }}</span>
         {% endif %}
         {% for cat in book.categories.all|slice:":2" %}
           <span class="badge badge--category">{{ cat.name }}</span>
         {% endfor %}
-        <span class="book-code">{{ book.book_code }}</span>
       </div>
-      <h3 class="book-title">{{ book.title }}</h3>
-      <p class="book-author">{{ book.get_author_display }} · {{ book.publisher.name }}</p>
+      <h3 class="book-title" style="-webkit-line-clamp:1;">
+        {{ book.book_list.title }}{% if book.book_list.subtitle %}<span style="font-weight:400; color:var(--text-sub);"> — {{ book.book_list.subtitle }}</span>{% endif %}{% if book.book_list.edition %}<span style="font-size:0.78rem; color:var(--text-muted); margin-left:4px;">{{ book.book_list.edition }}</span>{% endif %}
+      </h3>
+      <p class="book-author">{{ book.get_author_display }} / {{ book.publisher.name }}</p>
       {% if book.description %}
-        <p class="book-desc-preview">{{ book.description|truncatechars:120 }}</p>
+        <p class="book-desc-preview">{{ book.description }}</p>
       {% endif %}
     </div>
   </a>

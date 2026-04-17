@@ -12,6 +12,7 @@
 - GET  /pipeline/year/stream/<job_id>/         → 연도 추출 SSE 스트림
 - POST /pipeline/category/run/                 → 카테고리 분류 시작 (job_id 반환)
 - GET  /pipeline/category/stream/<job_id>/     → 카테고리 분류 SSE 스트림
+- POST /pipeline/category/apply/               → 카테고리 분류 결과 DB 반영
 - POST /pipeline/candidates/search/            → 알라딘 도서 후보 검색 (AJAX)
 - POST /pipeline/candidates/apply/             → 선택 후보 도서 정보 적용 (AJAX)
 - GET  /pipeline/thumbnails/scan/              → 미사용 썸네일 파일 목록 반환 (AJAX)
@@ -100,7 +101,9 @@ def _get_pipeline_stats() -> dict:
     embedded_ids = BookEmbedding.objects.values_list("book_list_id", flat=True)
     from books.models import YES24Candidate
     stats = {
-        "total_books": Book.objects.filter(is_active=True).count(),
+        "total_books_all":    Book.objects.count(),
+        "total_books_active": Book.objects.filter(is_active=True).count(),
+        "total_book_lists":   BookList.objects.count(),
         "pending": BookList.objects.filter(description="").count(),
         "missing_embed": (
             BookList.objects
@@ -118,6 +121,9 @@ def _get_pipeline_stats() -> dict:
             .count()
         ),
         "yes24_pending": YES24Candidate.objects.values("book_list").distinct().count(),
+        "thumb_with_url":    BookList.objects.exclude(thumbnail_url="").count(),
+        "thumb_without_url": BookList.objects.filter(thumbnail_url="").count(),
+        "thumb_with_file":   BookList.objects.exclude(thumbnail="").count(),
     }
     cache.set(_PIPELINE_STATS_CACHE_KEY, stats, _PIPELINE_STATS_CACHE_TTL)
     return stats
@@ -126,6 +132,41 @@ def _get_pipeline_stats() -> dict:
 @_staff_required
 def pipeline_page(request):
     return render(request, "data_pipeline/index.html", _get_pipeline_stats())
+
+
+@_staff_required
+def books_list_api(request):
+    """통계 카드 popover용 — 각 유형별 도서 목록 반환 (AJAX)."""
+    from django.db.models import Count
+    from django.urls import reverse
+    from books.models import Book, BookEmbedding, BookList
+
+    type_ = request.GET.get("type", "")
+    embedded_ids = BookEmbedding.objects.values_list("book_list_id", flat=True)
+
+    if type_ == "uncollected":
+        bls = BookList.objects.filter(description="")
+    elif type_ == "no_category":
+        bls = (BookList.objects.exclude(description="")
+               .annotate(cat_count=Count("categories")).filter(cat_count=0))
+    elif type_ == "no_difficulty":
+        bls = BookList.objects.exclude(description="").filter(difficulty="")
+    elif type_ == "no_embedding":
+        bls = BookList.objects.exclude(description="").exclude(pk__in=embedded_ids)
+    else:
+        return JsonResponse({"error": "올바르지 않은 type"}, status=400)
+
+    result = []
+    for bl in bls.prefetch_related("books").order_by("title")[:200]:
+        book = bl.books.filter(is_active=True).first() or bl.books.first()
+        if book:
+            result.append({
+                "title": bl.title,
+                "book_code": book.book_code,
+                "url": reverse("books:detail", args=[book.pk]),
+            })
+
+    return JsonResponse({"books": result})
 
 
 # ── 작업 중단 ─────────────────────────────────────────────────
@@ -140,6 +181,96 @@ def stop_job(request, job_id: str):
         e.set()
         return JsonResponse({"ok": True})
     return JsonResponse({"error": "실행 중인 작업이 없습니다."}, status=404)
+
+
+# ── 데이터 수집 전용 (분류·임베딩 제외) ──────────────────────────
+
+_collect_jobs: dict[str, Queue] = {}
+_collect_jobs_lock = threading.Lock()
+_collect_running = threading.Event()
+
+
+@_staff_required
+@require_POST
+def run_collect_only(request):
+    """description·thumbnail·toc 수집만 실행 (분류·임베딩 없음, SSE)."""
+    if _collect_running.is_set():
+        if not _parse_force(request):
+            return JsonResponse({"error": "이미 데이터 수집이 진행 중입니다."}, status=409)
+        _collect_running.clear()
+
+    from books.models import BookList
+    targets = list(
+        BookList.objects
+        .filter(description="")
+        .select_related("author", "publisher")
+        .order_by("title")
+    )
+    if not targets:
+        return JsonResponse({"error": "수집할 도서가 없습니다."}, status=404)
+
+    job_id = str(uuid.uuid4())
+    q: Queue = Queue()
+    cancel_event = _register_cancel(job_id)
+    with _collect_jobs_lock:
+        _collect_jobs[job_id] = q
+
+    _collect_running.set()
+    threading.Thread(target=_collect_worker, args=(job_id, q, targets, cancel_event), daemon=True).start()
+    return JsonResponse({"job_id": job_id})
+
+
+def _collect_worker(job_id: str, q: Queue, targets: list, cancel_event: threading.Event):
+    try:
+        from books.services import fetch_book_info_with_fallback, _save_thumbnail
+
+        total = len(targets)
+        q.put({"type": "start", "total": total})
+
+        done = errors = 0
+        for bl in targets:
+            if cancel_event.is_set():
+                q.put({"type": "cancelled", "done": done, "total": total})
+                break
+
+            q.put({"type": "progress", "done": done, "total": total, "current": bl.title})
+            try:
+                info = fetch_book_info_with_fallback(bl.title, bl.author.name)
+                update_fields = []
+                if info.get("thumbnail_url") and not bl.thumbnail_url:
+                    bl.thumbnail_url = info["thumbnail_url"]
+                    update_fields.append("thumbnail_url")
+                if info.get("description") and not bl.description:
+                    bl.description = info["description"]
+                    update_fields.append("description")
+                if info.get("toc") and not bl.toc:
+                    bl.toc = info["toc"]
+                    update_fields.append("toc")
+                if bl.thumbnail_url and not bl.thumbnail:
+                    if _save_thumbnail(bl, bl.thumbnail_url):
+                        update_fields.append("thumbnail")
+                if update_fields:
+                    bl.save(update_fields=update_fields)
+                done += 1
+                q.put({"type": "log", "status": "success",
+                       "title": bl.title, "messages": update_fields})
+            except Exception as e:
+                errors += 1
+                q.put({"type": "log", "status": "error", "title": bl.title, "error": str(e)})
+
+        if not cancel_event.is_set():
+            q.put({"type": "complete", "done": done, "errors": errors, "total": total})
+    except Exception as e:
+        q.put({"type": "fatal", "error": str(e)})
+    finally:
+        q.put(None)
+        _collect_running.clear()
+        _unregister_cancel(job_id)
+
+
+def collect_stream(request, job_id: str):
+    """SSE 스트림 — 데이터 수집 진행 상황."""
+    return _make_sse_response(_collect_jobs, _collect_jobs_lock, job_id)
 
 
 # ── 전체 파이프라인 ───────────────────────────────────────────
@@ -503,19 +634,17 @@ def year_stream(request, job_id: str):
 @_staff_required
 @require_POST
 def run_classify_category(request):
-    """description 있음 + 카테고리 없음 도서를 SSE 방식으로 일괄 분류."""
+    """description 있는 전체 도서를 SSE 방식으로 일괄 분류 (DB 저장 없이 결과 반환)."""
     if _category_running.is_set():
         if not _parse_force(request):
             return JsonResponse({"error": "이미 카테고리 분류가 진행 중입니다."}, status=409)
         _category_running.clear()
 
-    from django.db.models import Count
     from books.models import BookList
     targets = list(
         BookList.objects
         .exclude(description="")
-        .annotate(cat_count=Count("categories"))
-        .filter(cat_count=0)
+        .prefetch_related("categories")
         .order_by("title")
     )
     if not targets:
@@ -533,20 +662,22 @@ def run_classify_category(request):
 
 
 def _category_worker(job_id: str, q: Queue, targets: list, cancel_event: threading.Event):
+    """분류 결과를 DB에 바로 저장하지 않고 preview 이벤트로 반환한다."""
     try:
-        from books.models import BookListCategory, Category
         from books.services import classify_category
 
         total = len(targets)
         q.put({"type": "start", "total": total})
 
         done = errors = 0
+        results = []
         for bl in targets:
             if cancel_event.is_set():
                 q.put({"type": "cancelled", "done": done, "total": total})
                 break
 
             q.put({"type": "progress", "done": done, "total": total, "current": bl.title})
+            old_categories = list(bl.categories.values_list("name", flat=True))
             try:
                 category_names = classify_category(bl.title, bl.description)
                 if not category_names:
@@ -555,22 +686,23 @@ def _category_worker(job_id: str, q: Queue, targets: list, cancel_event: threadi
                            "title": bl.title, "error": "카테고리 반환 없음"})
                     continue
 
-                assigned = []
-                for name in category_names:
-                    cat, _ = Category.objects.get_or_create(name=name)
-                    BookListCategory.objects.get_or_create(book_list=bl, category=cat)
-                    assigned.append(name)
-
+                results.append({
+                    "book_list_id": bl.id,
+                    "title": bl.title,
+                    "old_categories": old_categories,
+                    "new_categories": category_names,
+                })
                 done += 1
                 q.put({"type": "log", "status": "success",
-                       "title": bl.title, "categories": assigned})
+                       "title": bl.title, "categories": category_names})
             except Exception as e:
                 errors += 1
                 q.put({"type": "log", "status": "error",
                        "title": bl.title, "error": str(e)})
 
         if not cancel_event.is_set():
-            q.put({"type": "complete", "done": done, "errors": errors, "total": total})
+            q.put({"type": "preview", "done": done, "errors": errors,
+                   "total": total, "results": results})
     except Exception as e:
         q.put({"type": "fatal", "error": str(e)})
     finally:
@@ -582,6 +714,31 @@ def _category_worker(job_id: str, q: Queue, targets: list, cancel_event: threadi
 def category_stream(request, job_id: str):
     """SSE 스트림 — 카테고리 분류 진행 상황."""
     return _make_sse_response(_category_jobs, _category_jobs_lock, job_id)
+
+
+@_staff_required
+@require_POST
+def category_apply(request):
+    """선택된 카테고리 분류 결과를 DB에 반영한다."""
+    data = json.loads(request.body)
+    items = data.get("items", [])
+    from books.models import BookList, BookListCategory, Category
+    applied = 0
+    for item in items:
+        bl_id = item.get("book_list_id")
+        category_names = item.get("categories", [])
+        if not bl_id or not category_names:
+            continue
+        try:
+            bl = BookList.objects.get(pk=bl_id)
+            bl.categories.clear()
+            for name in category_names:
+                cat, _ = Category.objects.get_or_create(name=name)
+                BookListCategory.objects.get_or_create(book_list=bl, category=cat)
+            applied += 1
+        except BookList.DoesNotExist:
+            continue
+    return JsonResponse({"ok": True, "applied": applied})
 
 
 # ── 알라딘 도서 후보 선택 ─────────────────────────────────────

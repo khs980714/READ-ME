@@ -12,4 +12,7 @@ urlpatterns = [
     path("manage/<int:pk>/edit/", views.book_edit, name="edit"),
     path("manage/<int:pk>/delete/", views.book_delete, name="delete"),
     path("manage/<int:pk>/collect/", views.book_collect, name="collect"),
+    path("manage/<int:pk>/apply-thumbnail/", views.book_apply_thumbnail, name="apply_thumbnail"),
+    path("manage/scrape-url/", views.book_scrape_url, name="scrape_url"),
+    path("manage/sync-thumbnails/", views.book_sync_thumbnails, name="sync_thumbnails"),
 ]

@@ -44,6 +44,7 @@ def book_list(request):
             Q(book_list__title__icontains=query)
             | Q(book_list__edition__icontains=query)
             | Q(book_list__author__name__icontains=query)
+            | Q(book_code__icontains=query)
         ).distinct()
     if difficulty == "미분류":
         qs = qs.filter(book_list__difficulty="")
@@ -100,7 +101,11 @@ def book_manage(request):
             | Q(book_list__author__name__icontains=q)
             | Q(book_code__icontains=q)
         ).distinct()
-    return render(request, "books/manage.html", {"books": qs, "query": q})
+
+    return render(request, "books/manage.html", {
+        "books": qs,
+        "query": q,
+    })
 
 
 @_staff_required
@@ -109,6 +114,8 @@ def book_add(request):
     difficulties = BookList.Difficulty.choices
     error = None
     form_data = {}
+    duplicate_book_list = None
+    duplicate_books = []
 
     if request.method == "POST":
         form_data = request.POST
@@ -126,6 +133,7 @@ def book_add(request):
         toc = request.POST.get("toc", "").strip()
         category_ids = request.POST.getlist("categories")
         is_active = request.POST.get("is_active") == "on"
+        confirm_link = request.POST.get("confirm_link") == "true"
 
         if not all([book_code, title, author_name, publisher_name]):
             error = "도서 코드, 도서명, 저자, 출판사는 필수 항목입니다."
@@ -133,44 +141,55 @@ def book_add(request):
             try:
                 author, _ = Author.objects.get_or_create(name=author_name)
                 publisher, _ = Publisher.objects.get_or_create(name=publisher_name)
-                book_list, created = BookList.objects.get_or_create(
-                    title=title,
-                    edition=edition,
-                    author=author,
-                    publisher=publisher,
-                    defaults={
-                        "subtitle": subtitle,
-                        "difficulty": difficulty,
-                        "publication_year": publication_year,
-                        "thumbnail_url": thumbnail_url,
-                        "description": description,
-                        "toc": toc,
-                    },
-                )
-                if not created:
-                    # 같은 (title, edition, author, publisher)가 있으면 수집 정보만 갱신
-                    book_list.subtitle = subtitle
-                    book_list.edition = edition
-                    book_list.difficulty = difficulty
-                    book_list.publication_year = publication_year
-                    book_list.thumbnail_url = thumbnail_url
-                    book_list.description = description
-                    book_list.toc = toc
-                    book_list.save()
 
-                book_list.categories.set(Category.objects.filter(id__in=category_ids))
-                Book.objects.create(
-                    book_code=book_code,
-                    book_list=book_list,
-                    is_active=is_active,
-                )
-                # 썸네일 URL이 있으면 즉시 다운로드
-                if thumbnail_url and not book_list.thumbnail:
-                    from .services import _save_thumbnail
-                    if _save_thumbnail(book_list, thumbnail_url):
-                        book_list.save(update_fields=["thumbnail"])
-                messages.success(request, f"도서 [{book_code}] {title} 이(가) 추가되었습니다.")
-                return redirect("books:manage")
+                # 동일한 (title, edition, author, publisher) BookList 존재 여부 확인
+                try:
+                    existing_bl = BookList.objects.get(
+                        title=title, edition=edition, author=author, publisher=publisher
+                    )
+                    # 중복 BookList 발견
+                    if not confirm_link:
+                        duplicate_book_list = existing_bl
+                        duplicate_books = list(existing_bl.books.all())
+                    else:
+                        # 사용자가 확인: 기존 BookList에 새 Book 연결
+                        Book.objects.create(
+                            book_code=book_code,
+                            book_list=existing_bl,
+                            is_active=is_active,
+                        )
+                        messages.success(
+                            request,
+                            f"도서 [{book_code}] {title} 이(가) 기존 도서로 연결되어 추가되었습니다.",
+                        )
+                        return redirect("books:manage")
+                except BookList.DoesNotExist:
+                    # 중복 없음 — 신규 BookList 생성
+                    book_list = BookList.objects.create(
+                        title=title,
+                        subtitle=subtitle,
+                        edition=edition,
+                        author=author,
+                        publisher=publisher,
+                        difficulty=difficulty,
+                        publication_year=publication_year,
+                        thumbnail_url=thumbnail_url,
+                        description=description,
+                        toc=toc,
+                    )
+                    book_list.categories.set(Category.objects.filter(id__in=category_ids))
+                    Book.objects.create(
+                        book_code=book_code,
+                        book_list=book_list,
+                        is_active=is_active,
+                    )
+                    if thumbnail_url and not book_list.thumbnail:
+                        from .services import _save_thumbnail
+                        if _save_thumbnail(book_list, thumbnail_url):
+                            book_list.save(update_fields=["thumbnail"])
+                    messages.success(request, f"도서 [{book_code}] {title} 이(가) 추가되었습니다.")
+                    return redirect("books:manage")
+
             except IntegrityError:
                 error = f"도서 코드 '{book_code}'는 이미 존재합니다."
             except Exception as e:
@@ -184,6 +203,8 @@ def book_add(request):
         "difficulties": difficulties,
         "error": error,
         "form_data": form_data,
+        "duplicate_book_list": duplicate_book_list,
+        "duplicate_books": duplicate_books,
     })
 
 
@@ -199,6 +220,8 @@ def book_edit(request, pk):
     difficulties = BookList.Difficulty.choices
     selected_category_ids = set(book_list.categories.values_list("id", flat=True))
     error = None
+    duplicate_book_list = None
+    duplicate_books = []
     form_data = {
         "title": book_list.title,
         "subtitle": book_list.subtitle,
@@ -227,60 +250,95 @@ def book_edit(request, pk):
         toc = request.POST.get("toc", "").strip()
         category_ids = request.POST.getlist("categories")
         is_active = request.POST.get("is_active") == "on"
+        confirm_link = request.POST.get("confirm_link") == "true"
 
         if not all([title, author_name, publisher_name]):
             error = "도서명, 저자, 출판사는 필수 항목입니다."
         else:
             try:
                 from .services import _save_thumbnail
-                # 변경 전 값 스냅샷 — 임베딩 재생성·썸네일 갱신 여부 판단용
                 prev_title         = book_list.title
                 prev_description   = book_list.description
                 prev_thumbnail_url = book_list.thumbnail_url
 
                 author, _ = Author.objects.get_or_create(name=author_name)
                 publisher, _ = Publisher.objects.get_or_create(name=publisher_name)
-                book_list.title = title
-                book_list.subtitle = subtitle
-                book_list.edition = edition
-                book_list.author = author
-                book_list.publisher = publisher
-                book_list.difficulty = difficulty
-                book_list.publication_year = publication_year
-                book_list.thumbnail_url = thumbnail_url
-                book_list.description = description
-                book_list.toc = toc
-                book_list.save()
-                book_list.categories.set(Category.objects.filter(id__in=category_ids))
-                book.is_active = is_active
-                book.save()
 
-                # 썸네일 URL이 변경됐으면 기존 파일 삭제 후 재다운로드
-                if thumbnail_url and thumbnail_url != prev_thumbnail_url:
-                    if book_list.thumbnail:
-                        book_list.thumbnail.delete(save=False)
-                    if _save_thumbnail(book_list, thumbnail_url):
-                        book_list.save(update_fields=["thumbnail"])
-
-                # 제목 또는 설명이 바뀌고 설명이 있으면 임베딩 재생성
-                needs_reembed = (
-                    (title != prev_title or description != prev_description)
-                    and bool(description)
-                )
-                if needs_reembed:
-                    _schedule_embedding_refresh(book_list.pk)
-                    messages.success(
-                        request,
-                        f"도서 [{book.book_code}] {title} 이(가) 수정되었습니다. "
-                        "임베딩 재생성이 백그라운드에서 진행됩니다.",
+                # 동일한 (title, edition, author, publisher) 를 가진 다른 BookList 존재 여부 확인
+                duplicate_found = False
+                try:
+                    existing_bl = BookList.objects.get(
+                        title=title, edition=edition, author=author, publisher=publisher
                     )
-                else:
-                    messages.success(request, f"도서 [{book.book_code}] {title} 이(가) 수정되었습니다.")
-                return redirect("books:manage")
+                    if existing_bl.pk != book_list.pk:
+                        duplicate_found = True
+                        if not confirm_link:
+                            # 중복 경고 표시
+                            duplicate_book_list = existing_bl
+                            duplicate_books = list(existing_bl.books.all())
+                            selected_category_ids = set(int(i) for i in category_ids if i)
+                        else:
+                            # 기존 BookList로 re-link
+                            old_book_list = book.book_list
+                            book.book_list = existing_bl
+                            book.is_active = is_active
+                            book.save()
+                            existing_bl.categories.set(Category.objects.filter(id__in=category_ids))
+                            # 기존 BookList에 더 이상 Book이 없으면 삭제
+                            if not old_book_list.books.exists():
+                                old_book_list.delete()
+                            messages.success(
+                                request,
+                                f"도서 [{book.book_code}]이(가) 기존 도서 '{existing_bl.full_title}'로 연결되었습니다.",
+                            )
+                            return redirect("books:manage")
+                except BookList.DoesNotExist:
+                    pass
+
+                if not duplicate_found:
+                    # 중복 없음 — 정상 저장
+                    # 썸네일: model.save() 전에 처리해 파일 경로를 한 번의 save()로 함께 저장
+                    if thumbnail_url and thumbnail_url != prev_thumbnail_url:
+                        if book_list.thumbnail:
+                            book_list.thumbnail.delete(save=False)
+                        _save_thumbnail(book_list, thumbnail_url)
+
+                    book_list.title = title
+                    book_list.subtitle = subtitle
+                    book_list.edition = edition
+                    book_list.author = author
+                    book_list.publisher = publisher
+                    book_list.difficulty = difficulty
+                    book_list.publication_year = publication_year
+                    book_list.thumbnail_url = thumbnail_url
+                    book_list.description = description
+                    book_list.toc = toc
+                    book_list.save()  # thumbnail 파일 경로 포함 전체 저장
+                    book_list.categories.set(Category.objects.filter(id__in=category_ids))
+                    book.is_active = is_active
+                    book.save()
+
+                    # 제목 또는 설명이 바뀌고 설명이 있으면 임베딩 재생성
+                    needs_reembed = (
+                        (title != prev_title or description != prev_description)
+                        and bool(description)
+                    )
+                    if needs_reembed:
+                        _schedule_embedding_refresh(book_list.pk)
+                        messages.success(
+                            request,
+                            f"도서 [{book.book_code}] {title} 이(가) 수정되었습니다. "
+                            "임베딩 재생성이 백그라운드에서 진행됩니다.",
+                        )
+                    else:
+                        messages.success(request, f"도서 [{book.book_code}] {title} 이(가) 수정되었습니다.")
+                    return redirect("books:manage")
+
             except Exception as e:
                 error = str(e)
 
-        selected_category_ids = set(int(i) for i in category_ids if i)
+        if not duplicate_book_list:
+            selected_category_ids = set(int(i) for i in category_ids if i)
 
     return render(request, "books/manage_form.html", {
         "mode": "edit",
@@ -291,6 +349,57 @@ def book_edit(request, pk):
         "difficulties": difficulties,
         "selected_category_ids": selected_category_ids,
         "error": error,
+        "duplicate_book_list": duplicate_book_list,
+        "duplicate_books": duplicate_books,
+    })
+
+
+# ── 썸네일 일괄 갱신 ─────────────────────────────────────────
+_thumb_sync_in_progress: bool = False
+_thumb_sync_lock = threading.Lock()
+
+
+@_staff_required
+@require_POST
+def book_sync_thumbnails(request):
+    """thumbnail_url 기반 썸네일 일괄 갱신 (AJAX) — 백그라운드 실행.
+
+    thumbnail_url이 있는 모든 BookList의 이미지를 재다운로드하여 저장합니다.
+    링크가 없는 BookList는 건드리지 않습니다.
+    """
+    global _thumb_sync_in_progress
+    with _thumb_sync_lock:
+        if _thumb_sync_in_progress:
+            return JsonResponse({"ok": False, "message": "이미 갱신이 진행 중입니다."})
+        _thumb_sync_in_progress = True
+
+    total = BookList.objects.exclude(thumbnail_url="").count()
+
+    def _run():
+        global _thumb_sync_in_progress
+        try:
+            from .services import _save_thumbnail
+            qs = BookList.objects.exclude(thumbnail_url="")
+            for bl in qs.iterator():
+                # 기존 파일 먼저 삭제하여 덮어쓰기 보장
+                if bl.thumbnail:
+                    bl.thumbnail.delete(save=False)
+                if _save_thumbnail(bl, bl.thumbnail_url):
+                    bl.save(update_fields=["thumbnail"])
+                elif not bl.thumbnail.name:
+                    # 다운로드 실패 + 파일 삭제된 경우 DB도 비워서 일치
+                    bl.save(update_fields=["thumbnail"])
+        except Exception as exc:
+            logger.error("썸네일 일괄 갱신 오류: %s", exc)
+        finally:
+            with _thumb_sync_lock:
+                _thumb_sync_in_progress = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return JsonResponse({
+        "ok": True,
+        "message": f"총 {total}권의 썸네일 갱신이 백그라운드에서 시작되었습니다.",
+        "total": total,
     })
 
 
@@ -343,6 +452,62 @@ def book_collect(request, pk):
         return JsonResponse({"ok": True, **result})
     except Exception as exc:
         logger.error("book_collect 오류 (pk=%s): %s", pk, exc)
+        return JsonResponse({"ok": False, "error": str(exc)}, status=500)
+
+
+@_staff_required
+@require_POST
+def book_scrape_url(request):
+    """링크로 도서 정보 수집 (수정 폼 AJAX용).
+
+    Request JSON: {"url": "https://..."}
+    Response JSON:
+        {"status": "ok", "data": {...}}
+        {"status": "not_implemented", "source": "aladin"}
+        {"status": "unsupported"}
+        {"status": "error", "message": "..."}
+    """
+    import json
+    try:
+        body = json.loads(request.body or "{}")
+    except Exception:
+        return JsonResponse({"status": "error", "message": "잘못된 요청입니다."}, status=400)
+
+    url = body.get("url", "").strip()
+    if not url:
+        return JsonResponse({"status": "error", "message": "URL을 입력해주세요."}, status=400)
+
+    from .services import scrape_from_url
+    result = scrape_from_url(url)
+    return JsonResponse(result)
+
+
+@_staff_required
+@require_POST
+def book_apply_thumbnail(request, pk):
+    """썸네일 URL 즉시 다운로드·저장 (수정 폼 AJAX용)."""
+    import json as _json
+    book = get_object_or_404(Book, pk=pk)
+    try:
+        body = _json.loads(request.body or "{}")
+    except Exception:
+        return JsonResponse({"ok": False, "error": "잘못된 요청"}, status=400)
+
+    thumbnail_url = body.get("thumbnail_url", "").strip()
+    if not thumbnail_url:
+        return JsonResponse({"ok": False, "error": "URL이 없습니다."}, status=400)
+
+    try:
+        from .services import _save_thumbnail
+        bl = book.book_list
+        if bl.thumbnail:
+            bl.thumbnail.delete(save=False)
+        bl.thumbnail_url = thumbnail_url
+        saved = _save_thumbnail(bl, thumbnail_url)
+        bl.save(update_fields=["thumbnail_url", "thumbnail"])
+        return JsonResponse({"ok": True, "saved": saved})
+    except Exception as exc:
+        logger.error("apply_thumbnail 오류 (pk=%s): %s", pk, exc)
         return JsonResponse({"ok": False, "error": str(exc)}, status=500)
 
 

@@ -3,45 +3,71 @@
 
 {% block title %}로그인 — READ:ME{% endblock %}
 
+{% block body_class %}login-body{% endblock %}
+
 {% block extra_css %}
 <style>
+  .login-body .topbar,
+  .login-body .navbar,
+  .login-body .footer,
+  .login-body .scroll-top-btn { display: none !important; }
+
+  .login-body .main-content {
+    padding: 0;
+    flex: 1;
+  }
+
+  .login-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 40px 16px;
+  }
   .login-wrap {
-    max-width: 420px;
-    margin: 60px auto;
+    width: 100%;
+    max-width: 380px;
+  }
+  .login-brand {
+    text-align: center;
+    margin-bottom: 36px;
+  }
+  .login-brand-logo {
+    display: inline-block;
+    font-size: 2rem;
+    font-weight: 900;
+    letter-spacing: -0.5px;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .login-brand-logo span { color: var(--primary); }
+
+  .login-card {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 40px 36px;
+    padding: 32px 28px;
     box-shadow: var(--shadow-md);
   }
-  .login-title {
-    font-size: 1.3rem;
-    font-weight: 800;
-    margin-bottom: 6px;
-  }
-  .login-sub {
-    font-size: 0.88rem;
-    color: var(--text-sub);
-    margin-bottom: 28px;
-  }
-  .form-group { margin-bottom: 16px; }
+  .form-group { margin-bottom: 14px; }
   .form-label {
     display: block;
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     font-weight: 600;
-    color: var(--text-sub);
-    margin-bottom: 6px;
+    color: var(--text-muted);
+    margin-bottom: 5px;
   }
   .form-input {
     width: 100%;
     padding: 10px 14px;
     border: 1.5px solid var(--border);
     border-radius: 8px;
-    font-size: 0.9rem;
+    font-size: 0.92rem;
     font-family: inherit;
     background: var(--bg);
     outline: none;
     transition: border-color .2s;
+    box-sizing: border-box;
   }
   .form-input:focus { border-color: var(--primary); background: #fff; }
   .login-error {
@@ -50,8 +76,8 @@
     border: 1px solid #fca5a5;
     border-radius: 8px;
     padding: 10px 14px;
-    font-size: 0.88rem;
-    margin-bottom: 16px;
+    font-size: 0.85rem;
+    margin-bottom: 14px;
   }
   .btn-login {
     width: 100%;
@@ -63,7 +89,7 @@
     font-size: 0.95rem;
     font-weight: 700;
     cursor: pointer;
-    margin-top: 8px;
+    margin-top: 6px;
     transition: background .2s;
   }
   .btn-login:hover { background: var(--primary-dark); }
@@ -71,30 +97,35 @@
 {% endblock %}
 
 {% block content %}
-<div class="login-wrap">
-  <h1 class="login-title">관리자 로그인</h1>
-  <p class="login-sub">READ:ME 관리 시스템에 접근하려면 로그인하세요.</p>
-
-  {% if error %}
-  <div class="login-error">{{ error }}</div>
-  {% endif %}
-
-  <form method="post" action="{% url 'accounts:login' %}{% if next %}?next={{ next }}{% endif %}">
-    {% csrf_token %}
-    <input type="hidden" name="next" value="{{ next }}">
-
-    <div class="form-group">
-      <label class="form-label" for="username">아이디</label>
-      <input class="form-input" type="text" id="username" name="username"
-             placeholder="관리자 아이디" autofocus autocomplete="username" required>
-    </div>
-    <div class="form-group">
-      <label class="form-label" for="password">비밀번호</label>
-      <input class="form-input" type="password" id="password" name="password"
-             placeholder="비밀번호" autocomplete="current-password" required>
+<div class="login-page">
+  <div class="login-wrap">
+    <div class="login-brand">
+      <a href="/" class="login-brand-logo">READ<span>:</span>ME</a>
     </div>
 
-    <button type="submit" class="btn-login">로그인</button>
-  </form>
+    <div class="login-card">
+      {% if error %}
+      <div class="login-error">{{ error }}</div>
+      {% endif %}
+
+      <form method="post" action="{% url 'accounts:login' %}{% if next %}?next={{ next }}{% endif %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ next }}">
+
+        <div class="form-group">
+          <label class="form-label" for="username">아이디</label>
+          <input class="form-input" type="text" id="username" name="username"
+                 placeholder="아이디를 입력하세요" autofocus autocomplete="username" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="password">비밀번호</label>
+          <input class="form-input" type="password" id="password" name="password"
+                 placeholder="비밀번호를 입력하세요" autocomplete="current-password" required>
+        </div>
+
+        <button type="submit" class="btn-login">로그인</button>
+      </form>
+    </div>
+  </div>
 </div>
 {% endblock %}

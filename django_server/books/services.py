@@ -23,23 +23,55 @@ from django.core.files.base import ContentFile
 logger = logging.getLogger(__name__)
 
 
+_CONTENT_TYPE_TO_EXT = {
+    "image/jpeg": ".jpg",
+    "image/jpg":  ".jpg",
+    "image/png":  ".png",
+    "image/webp": ".webp",
+    "image/gif":  ".gif",
+}
+
+
 def _save_thumbnail(book_list, url: str) -> bool:
     """URL에서 이미지를 다운로드하여 book_list.thumbnail 필드에 저장합니다.
 
     저장만 수행하고 model.save()는 호출하지 않습니다 — 호출 측에서 update_fields에
     'thumbnail'을 포함하여 저장하세요.
+
+    Content-Type이 image/* 가 아니면 저장하지 않고 False를 반환합니다.
     """
     if not url:
         return False
     try:
         resp = requests.get(
             url, timeout=10,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; ReadMe-Bot/1.0)"},
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            },
+            allow_redirects=True,
         )
         resp.raise_for_status()
+
+        # Content-Type 검증 — HTML 오류 페이지나 비이미지 응답이 저장되는 것을 방지
+        content_type = resp.headers.get("content-type", "").split(";")[0].strip().lower()
+        if not content_type.startswith("image/"):
+            logger.warning(
+                "썸네일 Content-Type 오류 — 이미지가 아님 "
+                "(book_list_id=%s, content_type=%s, url=%s)",
+                book_list.pk, content_type, url,
+            )
+            return False
+
+        # 확장자: URL 경로 우선, 없으면 Content-Type으로 결정
         ext = posixpath.splitext(urlparse(url).path)[1].lower()
         if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
-            ext = ".jpg"
+            ext = _CONTENT_TYPE_TO_EXT.get(content_type, ".jpg")
+
         filename = f"{book_list.pk}{ext}"
         book_list.thumbnail.save(filename, ContentFile(resp.content), save=False)
         return True
@@ -438,8 +470,8 @@ def _clean_yes24_text(tag, max_chars: int | None = None) -> str:
         raw = inner.get_text(separator="\n", strip=True)
 
     # UI 잔여 텍스트 제거 (줄 단위 및 인라인)
-    raw = _re.sub(r'(?m)^\s*(미리보기|펼쳐보기|접기)\s*$', '', raw)
-    raw = _re.sub(r'\s*(미리보기|펼쳐보기|접기)\s*', ' ', raw)
+    raw = _re.sub(r'(?m)^\s*(미리보기|펼쳐보기|접기|접어보기)\s*$', '', raw)
+    raw = _re.sub(r'\s*(미리보기|펼쳐보기|접기|접어보기)\s*', ' ', raw)
     raw = _re.sub(r'(?m)^\s*책의 일부 내용을 미리 읽어보실 수 있습니다\.?\s*$', '', raw)
 
     # 연속 공백·개행 정리
@@ -524,6 +556,42 @@ def fetch_yes24_book_detail(href: str) -> dict | None:
     except Exception as exc:
         logger.warning("YES24 상세 수집 실패 (%s): %s", href, exc)
         return None
+
+
+# ── URL 기반 수집 (수정 폼 수집 버튼용) ──────────────────────────
+
+def clean_toc_artifacts(text: str) -> str:
+    """목차 텍스트에서 YES24 UI 잔여 문자(접어보기 등)를 제거하고 정리합니다."""
+    import re as _re
+    text = _re.sub(r'(?m)^\s*(미리보기|펼쳐보기|접기|접어보기)\s*$', '', text)
+    text = _re.sub(r'\s*(접어보기)\s*', ' ', text)
+    text = _re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
+def scrape_from_url(url: str) -> dict:
+    """링크를 분석해 소스를 판별하고 도서 정보를 수집합니다.
+
+    반환 형태:
+        {"status": "ok",              "data": {...}}   — 수집 성공
+        {"status": "not_implemented", "source": str}  — 구현 전 소스 (알라딘)
+        {"status": "unsupported"}                      — 미지원 소스
+        {"status": "error",           "message": str} — 수집 실패
+    """
+    from urllib.parse import urlparse
+    parsed = urlparse(url.strip())
+    host = parsed.netloc.lower().lstrip("www.")
+
+    if "yes24.com" in host:
+        data = fetch_yes24_book_detail(url)
+        if data:
+            return {"status": "ok", "data": data}
+        return {"status": "error", "message": "YES24 페이지에서 데이터를 가져오지 못했습니다."}
+
+    if "aladin.co.kr" in host or "aladdin.co.kr" in host:
+        return {"status": "not_implemented", "source": "aladin"}
+
+    return {"status": "unsupported"}
 
 
 # ── 멀티소스 통합 수집 ────────────────────────────────────────

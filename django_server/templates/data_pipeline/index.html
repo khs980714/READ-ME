@@ -5,19 +5,6 @@
 
 {% block extra_css %}
 <style>
-  .pipeline-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 16px;
-    margin-bottom: 28px;
-  }
-  .stat-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 20px 24px;
-    box-shadow: var(--shadow-sm);
-  }
   .stat-label { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 6px; }
   .stat-value { font-size: 1.8rem; font-weight: 800; color: var(--primary); }
 
@@ -131,8 +118,145 @@
   .btn-danger:hover { background: #fecaca; }
   .btn-danger:disabled { opacity: .45; cursor: not-allowed; }
 
-  @media (max-width: 768px) {
-    .pipeline-grid { grid-template-columns: 1fr; }
+  @media (max-width: 900px) {
+    .stat-row2 { grid-template-columns: repeat(3, 1fr); }
+  }
+  @media (max-width: 600px) {
+    .stat-row1 { grid-template-columns: 1fr; }
+    .stat-row2 { grid-template-columns: 1fr 1fr; }
+  }
+
+  /* ── 대시보드 두 줄 레이아웃 ── */
+  .stat-row1 {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin-bottom: 12px;
+  }
+  .stat-row2 {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+  .stat-card-primary {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    box-shadow: var(--shadow-sm);
+  }
+  .stat-card-issue {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    box-shadow: var(--shadow-sm);
+    cursor: pointer;
+    transition: border-color .15s, box-shadow .15s;
+    position: relative;
+  }
+  .stat-card-issue:hover {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-light);
+  }
+  .stat-card-issue--plain { cursor: default; }
+  .stat-card-issue--plain:hover {
+    border-color: var(--border);
+    box-shadow: var(--shadow-sm);
+  }
+  .stat-card-clickable-hint {
+    position: absolute;
+    top: 8px; right: 10px;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    opacity: 0.7;
+  }
+
+  /* ── 팝오버 ── */
+  .stat-popover-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.45);
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+  }
+  .stat-popover-overlay.open { display: flex; }
+  .stat-popover {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: min(480px, 94vw);
+    max-height: 72vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 16px 40px rgba(0,0,0,.2);
+  }
+  .stat-popover-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .stat-popover-header h3 { font-size: 0.95rem; font-weight: 700; }
+  .stat-popover-count {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-left: 8px;
+    font-weight: 400;
+  }
+  .stat-popover-close {
+    background: none; border: none; cursor: pointer;
+    color: var(--text-muted); padding: 4px;
+    display: flex; align-items: center;
+  }
+  .stat-popover-close:hover { color: var(--text); }
+  .stat-popover-body {
+    overflow-y: auto;
+    padding: 8px 0;
+    flex: 1;
+  }
+  .stat-popover-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 20px;
+    text-decoration: none;
+    color: var(--text);
+    transition: background .12s;
+    border-bottom: 1px solid var(--border);
+  }
+  .stat-popover-item:last-child { border-bottom: none; }
+  .stat-popover-item:hover { background: var(--primary-light); color: var(--primary); }
+  .stat-popover-code {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    white-space: nowrap;
+    min-width: 70px;
+  }
+  .stat-popover-title {
+    font-size: 0.87rem;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .stat-popover-empty {
+    padding: 32px 20px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.87rem;
+  }
+  .stat-popover-loading {
+    padding: 32px 20px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.87rem;
   }
 </style>
 {% endblock %}
@@ -143,41 +267,73 @@
   <p class="page-desc">파이프라인 실행 및 임베딩 생성을 관리합니다.</p>
 </section>
 
-<!-- ── 통계 ── -->
-<div class="pipeline-grid">
-  <div class="stat-card">
-    <p class="stat-label">전체 활성 도서</p>
-    <p class="stat-value">{{ total_books }}</p>
+<!-- ── 통계 1행: 도서 현황 ── -->
+<div class="stat-row1">
+  <div class="stat-card-primary">
+    <p class="stat-label">등록 도서 수</p>
+    <p class="stat-value">{{ total_books_all }}</p>
   </div>
-  <div class="stat-card">
-    <p class="stat-label">미수집 도서 (설명 없음)</p>
-    <p class="stat-value" style="color:{% if pending %}#d97706{% else %}var(--primary){% endif %}">{{ pending }}</p>
+  <div class="stat-card-primary">
+    <p class="stat-label">현재 도서 수</p>
+    <p class="stat-value">{{ total_books_active }}</p>
   </div>
-  <div class="stat-card">
-    <p class="stat-label">임베딩 누락 도서</p>
-    <p class="stat-value" style="color:{% if missing_embed %}#d97706{% else %}var(--primary){% endif %}">{{ missing_embed }}</p>
-  </div>
-  <div class="stat-card">
-    <p class="stat-label">난이도 미분류 도서</p>
-    <p class="stat-value" style="color:{% if unclassified %}#d97706{% else %}var(--primary){% endif %}">{{ unclassified }}</p>
-  </div>
-  <div class="stat-card">
-    <p class="stat-label">연도 미등록 도서</p>
-    <p class="stat-value" style="color:{% if missing_year %}#d97706{% else %}var(--primary){% endif %}">{{ missing_year }}</p>
-  </div>
-  <div class="stat-card">
-    <p class="stat-label">카테고리 미분류 도서</p>
-    <p class="stat-value" style="color:{% if missing_category %}#d97706{% else %}var(--primary){% endif %}">{{ missing_category }}</p>
-  </div>
-  <div class="stat-card">
-    <p class="stat-label">YES24 후보 선택 대기</p>
-    <p class="stat-value" style="color:{% if yes24_pending %}#d97706{% else %}var(--primary){% endif %}">{{ yes24_pending }}</p>
+  <div class="stat-card-primary">
+    <p class="stat-label">도서 종류</p>
+    <p class="stat-value">{{ total_book_lists }}</p>
   </div>
 </div>
 
-<!-- ── 파이프라인 실행 ── -->
+<!-- ── 통계 2행: 미처리 현황 (클릭 시 popover) ── -->
+<div class="stat-row2">
+  <div class="stat-card-issue" data-popover-type="uncollected" data-popover-title="미수집 도서">
+    <span class="stat-card-clickable-hint">목록 보기 ↗</span>
+    <p class="stat-label">미수집 도서</p>
+    <p class="stat-value" style="color:{% if pending %}#d97706{% else %}var(--primary){% endif %}">{{ pending }}</p>
+  </div>
+  <div class="stat-card-issue" data-popover-type="no_category" data-popover-title="카테고리 미분류">
+    <span class="stat-card-clickable-hint">목록 보기 ↗</span>
+    <p class="stat-label">카테고리 미분류</p>
+    <p class="stat-value" style="color:{% if missing_category %}#d97706{% else %}var(--primary){% endif %}">{{ missing_category }}</p>
+  </div>
+  <div class="stat-card-issue" data-popover-type="no_difficulty" data-popover-title="난이도 미분류">
+    <span class="stat-card-clickable-hint">목록 보기 ↗</span>
+    <p class="stat-label">난이도 미분류</p>
+    <p class="stat-value" style="color:{% if unclassified %}#d97706{% else %}var(--primary){% endif %}">{{ unclassified }}</p>
+  </div>
+  <div class="stat-card-issue" data-popover-type="no_embedding" data-popover-title="임베딩 누락">
+    <span class="stat-card-clickable-hint">목록 보기 ↗</span>
+    <p class="stat-label">임베딩 누락</p>
+    <p class="stat-value" style="color:{% if missing_embed %}#d97706{% else %}var(--primary){% endif %}">{{ missing_embed }}</p>
+  </div>
+  <div class="stat-card-issue stat-card-issue--plain">
+    <p class="stat-label">연도 미등록</p>
+    <p class="stat-value" style="color:{% if missing_year %}#d97706{% else %}var(--primary){% endif %}">{{ missing_year }}</p>
+  </div>
+</div>
+
+<!-- ── 도서 목록 팝오버 ── -->
+<div class="stat-popover-overlay" id="statPopoverOverlay">
+  <div class="stat-popover" role="dialog" aria-modal="true">
+    <div class="stat-popover-header">
+      <h3>
+        <span id="statPopoverTitle"></span>
+        <span class="stat-popover-count" id="statPopoverCount"></span>
+      </h3>
+      <button class="stat-popover-close" id="statPopoverClose" aria-label="닫기">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="stat-popover-body" id="statPopoverBody">
+      <p class="stat-popover-loading">불러오는 중...</p>
+    </div>
+  </div>
+</div>
+
+<!-- ── 전체 데이터 파이프라인 실행 ── -->
 <div class="pipeline-card">
-  <h2>파이프라인 실행</h2>
+  <h2>전체 데이터 파이프라인 실행</h2>
 
   <!-- 수집 소스 선택 -->
   <div style="display:flex; gap:20px; margin-bottom:16px; padding:14px 16px; background:var(--bg); border:1px solid var(--border); border-radius:8px;">
@@ -229,49 +385,134 @@
   </div>
 </div>
 
-<!-- ── 임베딩 진행 ── -->
+<!-- ── 데이터 수집 ── -->
 <div class="pipeline-card">
-  <h2>임베딩 진행</h2>
-  <p class="card-desc">
-    설명이 있는 모든 도서의 임베딩을 생성·갱신합니다.
-    이미 임베딩된 도서도 최신 내용으로 다시 저장됩니다.
-    현재 임베딩 누락 도서: <strong>{{ missing_embed }}권</strong>
+  <h2>데이터 수집</h2>
+
+  <!-- 수집 소스 선택 -->
+  <div style="display:flex; gap:20px; margin-bottom:16px; padding:14px 16px; background:var(--bg); border:1px solid var(--border); border-radius:8px;">
+    <label style="display:inline-flex; align-items:center; gap:7px; cursor:pointer; font-size:0.9rem; font-weight:600;">
+      <input type="radio" name="collectSource" value="aladin" checked style="accent-color:var(--primary);">
+      알라딘 API
+    </label>
+    <label style="display:inline-flex; align-items:center; gap:7px; cursor:pointer; font-size:0.9rem; font-weight:600;">
+      <input type="radio" name="collectSource" value="yes24" style="accent-color:var(--primary);">
+      YES24
+    </label>
+  </div>
+
+  <p class="card-desc" id="collectDesc">
+    설명·썸네일·목차가 없는 <strong>{{ pending }}권</strong>을 대상으로
+    알라딘 API에서 도서 정보를 수집합니다.
+    분류·임베딩은 실행하지 않으므로 단계적으로 진행할 때 사용하세요.
   </p>
 
   <div class="pipeline-controls">
-    <button class="btn-primary" id="btnEmbed">
+    <button class="btn-primary" id="btnCollect">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="10"/>
-        <path d="M12 8v4l3 3"/>
+        <polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/>
+        <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
       </svg>
-      임베딩 시작
+      수집 시작
     </button>
-    <button class="btn-danger" id="btnEmbedStop" style="display:none;">
+    <button class="btn-danger" id="btnCollectStop" style="display:none;">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <rect x="3" y="3" width="18" height="18" rx="2"/>
       </svg>
       중지
     </button>
-    <span class="status-badge" id="embedStatus"></span>
+    <span class="status-badge" id="collectStatus"></span>
   </div>
 
-  <div class="progress-wrap" id="embedProgressWrap" style="display:none;">
+  <div class="progress-wrap" id="collectProgressWrap" style="display:none;">
     <div class="progress-meta">
-      <span id="embedProgressText">0 / 0</span>
-      <span id="embedProgressPct">0%</span>
+      <span id="collectProgressText">0 / 0</span>
+      <span id="collectProgressPct">0%</span>
     </div>
     <div class="progress-bar-track">
-      <div class="progress-bar-fill" id="embedProgressBar"></div>
+      <div class="progress-bar-fill" id="collectProgressBar"></div>
     </div>
-    <p class="progress-current" id="embedCurrent"></p>
+    <p class="progress-current" id="collectCurrent"></p>
   </div>
-  <div class="log-wrap" id="embedLogWrap" style="display:none;">
-    <div id="embedLog"></div>
+  <div class="log-wrap" id="collectLogWrap" style="display:none;">
+    <div id="collectLog"></div>
   </div>
 </div>
-<!-- ── 난이도 분류 진행 ── -->
+
+<!-- ── 카테고리 분류 ── -->
 <div class="pipeline-card">
-  <h2>난이도 분류 진행</h2>
+  <h2>카테고리 분류</h2>
+  <p class="card-desc">
+    설명이 있는 전체 도서를 대상으로 LLM이 카테고리를 재분류합니다.
+    분류 완료 후 <strong>기존 카테고리</strong>와 새로 분류된 결과를 표로 확인하고,
+    원하는 항목만 선택해 적용하거나 취소할 수 있습니다.
+  </p>
+
+  <div class="pipeline-controls">
+    <button class="btn-primary" id="btnCategory">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 7h7v7H3zM14 7h7v7h-7zM3 17h7v4H3zM14 17h7v4h-7z"/>
+      </svg>
+      카테고리 분류 시작
+    </button>
+    <button class="btn-danger" id="btnCategoryStop" style="display:none;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+      </svg>
+      중지
+    </button>
+    <span class="status-badge" id="categoryStatus"></span>
+  </div>
+
+  <div class="progress-wrap" id="categoryProgressWrap" style="display:none;">
+    <div class="progress-meta">
+      <span id="categoryProgressText">0 / 0</span>
+      <span id="categoryProgressPct">0%</span>
+    </div>
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" id="categoryProgressBar"></div>
+    </div>
+    <p class="progress-current" id="categoryCurrent"></p>
+  </div>
+  <div class="log-wrap" id="categoryLogWrap" style="display:none;">
+    <div id="categoryLog"></div>
+  </div>
+
+  <!-- 분류 결과 비교 테이블 -->
+  <div id="categoryPreviewWrap" style="display:none; margin-top:24px;">
+    <h3 style="font-size:0.95rem; font-weight:700; margin-bottom:4px; color:var(--text);">분류 결과 비교</h3>
+    <p style="font-size:0.84rem; color:var(--text-sub); margin-bottom:14px;">
+      체크된 항목만 적용됩니다. 제외할 항목은 체크를 해제하세요.
+    </p>
+    <div style="overflow-x:auto; border:1px solid var(--border); border-radius:8px; margin-bottom:16px;">
+      <table id="categoryPreviewTable" style="width:100%; border-collapse:collapse; font-size:0.87rem;">
+        <thead>
+          <tr style="background:var(--bg); border-bottom:2px solid var(--border);">
+            <th style="padding:10px 14px; text-align:center; width:44px;">
+              <input type="checkbox" id="categorySelectAll" checked style="accent-color:var(--primary); cursor:pointer;">
+            </th>
+            <th style="padding:10px 14px; text-align:left; font-weight:600;">제목</th>
+            <th style="padding:10px 14px; text-align:left; width:200px; font-weight:600;">기존 카테고리</th>
+            <th style="padding:10px 14px; text-align:left; width:220px; font-weight:600;">새로 분류된 카테고리</th>
+          </tr>
+        </thead>
+        <tbody id="categoryPreviewBody"></tbody>
+      </table>
+    </div>
+    <p id="categoryNoChanges" style="display:none; font-size:0.87rem; color:var(--text-muted); padding:8px 0;">
+      분류된 카테고리 항목이 없습니다.
+    </p>
+    <div class="pipeline-controls" id="categoryPreviewControls">
+      <button class="btn-primary" id="btnCategoryApply">적용</button>
+      <button class="btn-ghost" id="btnCategoryCancel">취소</button>
+      <span id="categoryApplyStatus" style="font-size:0.85rem; margin-left:6px;"></span>
+    </div>
+  </div>
+</div>
+
+<!-- ── 난이도 분류 ── -->
+<div class="pipeline-card">
+  <h2>난이도 분류</h2>
   <p class="card-desc">
     설명이 있는 전체 도서를 대상으로 LLM이 난이도를 재분류합니다.
     분류 완료 후 <strong>기존 난이도</strong>와 달라진 항목을 표로 확인하고,
@@ -339,9 +580,73 @@
     </div>
   </div>
 </div>
-<!-- ── 출판 연도 추출 ── -->
+
+<!-- ── 임베딩 ── -->
 <div class="pipeline-card">
-  <h2>출판 연도 추출</h2>
+  <h2>임베딩</h2>
+  <p class="card-desc">
+    설명이 있는 모든 도서의 임베딩을 생성·갱신합니다.
+    이미 임베딩된 도서도 최신 내용으로 다시 저장됩니다.
+    현재 임베딩 누락 도서: <strong>{{ missing_embed }}권</strong>
+  </p>
+
+  <div class="pipeline-controls">
+    <button class="btn-primary" id="btnEmbed">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <path d="M12 8v4l3 3"/>
+      </svg>
+      임베딩 시작
+    </button>
+    <button class="btn-danger" id="btnEmbedStop" style="display:none;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+      </svg>
+      중지
+    </button>
+    <span class="status-badge" id="embedStatus"></span>
+  </div>
+
+  <div class="progress-wrap" id="embedProgressWrap" style="display:none;">
+    <div class="progress-meta">
+      <span id="embedProgressText">0 / 0</span>
+      <span id="embedProgressPct">0%</span>
+    </div>
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" id="embedProgressBar"></div>
+    </div>
+    <p class="progress-current" id="embedCurrent"></p>
+  </div>
+  <div class="log-wrap" id="embedLogWrap" style="display:none;">
+    <div id="embedLog"></div>
+  </div>
+</div>
+
+<!-- ── 썸네일 일괄 갱신 ── -->
+<div class="pipeline-card">
+  <h2>썸네일 일괄 갱신</h2>
+  <p class="card-desc">
+    썸네일 URL이 있는 전체 도서의 이미지를 재다운로드하여 저장합니다.
+    현재 링크 있음: <strong>{{ thumb_with_url }}</strong>권,
+    링크 없음: <strong>{{ thumb_without_url }}</strong>권,
+    저장됨: <strong id="thumbFileCount">{{ thumb_with_file }}</strong> / {{ thumb_with_url }}권
+  </p>
+
+  <div class="pipeline-controls">
+    <button class="btn-primary" id="btnSyncThumb">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <polyline points="23 4 23 10 17 10"/>
+        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+      </svg>
+      썸네일 갱신 시작
+    </button>
+    <span class="status-badge" id="thumbSyncStatus"></span>
+  </div>
+</div>
+
+<!-- ── 연도 분류 ── -->
+<div class="pipeline-card">
+  <h2>연도 분류</h2>
   <p class="card-desc">
     전체 도서의 제목과 설명에서 출판 연도를 자동 추출하여 저장합니다.
     제목에 연도가 없으면 설명에서 2차 확인합니다.
@@ -380,47 +685,6 @@
   </div>
   <div class="log-wrap" id="yearLogWrap" style="display:none;">
     <div id="yearLog"></div>
-  </div>
-</div>
-
-<!-- ── 카테고리 분류 ── -->
-<div class="pipeline-card">
-  <h2>카테고리 분류</h2>
-  <p class="card-desc">
-    설명은 있지만 카테고리가 없는 <strong>{{ missing_category }}권</strong>을 대상으로
-    LLM이 도서 내용을 분석해 카테고리를 자동으로 분류합니다.
-    (프로그래밍 언어, 웹 개발, 인공지능·데이터 등 12개 카테고리)
-    {% if not missing_category %}현재 미분류 도서가 없습니다.{% endif %}
-  </p>
-
-  <div class="pipeline-controls">
-    <button class="btn-primary" id="btnCategory" {% if not missing_category %}disabled{% endif %}>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M3 7h7v7H3zM14 7h7v7h-7zM3 17h7v4H3zM14 17h7v4h-7z"/>
-      </svg>
-      카테고리 분류 시작 ({{ missing_category }}권)
-    </button>
-    <button class="btn-danger" id="btnCategoryStop" style="display:none;">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <rect x="3" y="3" width="18" height="18" rx="2"/>
-      </svg>
-      중지
-    </button>
-    <span class="status-badge" id="categoryStatus"></span>
-  </div>
-
-  <div class="progress-wrap" id="categoryProgressWrap" style="display:none;">
-    <div class="progress-meta">
-      <span id="categoryProgressText">0 / 0</span>
-      <span id="categoryProgressPct">0%</span>
-    </div>
-    <div class="progress-bar-track">
-      <div class="progress-bar-fill" id="categoryProgressBar"></div>
-    </div>
-    <p class="progress-current" id="categoryCurrent"></p>
-  </div>
-  <div class="log-wrap" id="categoryLogWrap" style="display:none;">
-    <div id="categoryLog"></div>
   </div>
 </div>
 
@@ -510,6 +774,7 @@
 {% block extra_js %}
 <script>
   const CSRF_TOKEN             = "{{ csrf_token }}";
+  const BOOKS_LIST_URL         = "{% url 'pipeline:books_list' %}";
   const PIPELINE_RUN_URL       = "{% url 'pipeline:run' %}";
   const PIPELINE_STREAM        = "{% url 'pipeline:stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
   const STOP_BASE              = "{% url 'pipeline:stop' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
@@ -524,6 +789,10 @@
   const CANDIDATES_APPLY_URL   = "{% url 'pipeline:candidates_apply' %}";
   const CATEGORY_RUN_URL       = "{% url 'pipeline:category_run' %}";
   const CATEGORY_STREAM        = "{% url 'pipeline:category_stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
+  const CATEGORY_APPLY_URL     = "{% url 'pipeline:category_apply' %}";
+  const COLLECT_RUN_URL        = "{% url 'pipeline:collect_run' %}";
+  const COLLECT_STREAM         = "{% url 'pipeline:collect_stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
+  const SYNC_THUMBNAILS_URL    = "{% url 'books:sync_thumbnails' %}";
   const THUMB_SCAN_URL         = "{% url 'pipeline:thumbnails_scan' %}";
   const THUMB_CLEAN_URL        = "{% url 'pipeline:thumbnails_clean' %}";
   const YES24_RUN_URL          = "{% url 'pipeline:yes24_run' %}";
@@ -712,6 +981,21 @@
 
   function getSelectedSource() {
     return document.querySelector("input[name='pipelineSource']:checked")?.value || "aladin";
+  }
+
+  // ── 데이터 수집 소스 선택 ────────────────────────────────────
+  const collectDescEl = document.getElementById("collectDesc");
+  const COLLECT_DESC_ALADIN = `설명·썸네일·목차가 없는 <strong>{{ pending }}권</strong>을 대상으로 알라딘 API에서 도서 정보를 수집합니다. 분류·임베딩은 실행하지 않으므로 단계적으로 진행할 때 사용하세요.`;
+  const COLLECT_DESC_YES24  = `YES24 검색에서 도서별 후보 목록을 수집하여 저장합니다. 수집 후 <strong>YES24 후보 선택</strong> 카드에서 원하는 도서를 선택해 DB에 덮어쓸 수 있습니다.`;
+
+  document.querySelectorAll("input[name='collectSource']").forEach(radio => {
+    radio.addEventListener("change", () => {
+      collectDescEl.innerHTML = radio.value === "yes24" ? COLLECT_DESC_YES24 : COLLECT_DESC_ALADIN;
+    });
+  });
+
+  function getCollectSource() {
+    return document.querySelector("input[name='collectSource']:checked")?.value || "aladin";
   }
 
   // ── YES24 후보 선택 카드 ─────────────────────────────────────
@@ -1452,21 +1736,350 @@
     startLabel:   "연도 추출",
   });
 
-  // ── 카테고리 분류 섹션 ───────────────────────────────────────
+  // ── 카테고리 분류 섹션 (커스텀 핸들러) ──────────────────────────
+  (function () {
+    const btn          = document.getElementById("btnCategory");
+    const stopBtn      = document.getElementById("btnCategoryStop");
+    const statusBadge  = document.getElementById("categoryStatus");
+    const progressWrap = document.getElementById("categoryProgressWrap");
+    const progressBar  = document.getElementById("categoryProgressBar");
+    const progressText = document.getElementById("categoryProgressText");
+    const progressPct  = document.getElementById("categoryProgressPct");
+    const currentEl    = document.getElementById("categoryCurrent");
+    const logWrap      = document.getElementById("categoryLogWrap");
+    const logContainer = document.getElementById("categoryLog");
+    const previewWrap  = document.getElementById("categoryPreviewWrap");
+    const previewBody  = document.getElementById("categoryPreviewBody");
+    const selectAll    = document.getElementById("categorySelectAll");
+    const noChanges    = document.getElementById("categoryNoChanges");
+    const btnApply     = document.getElementById("btnCategoryApply");
+    const btnCancel    = document.getElementById("btnCategoryCancel");
+    const applyStatus  = document.getElementById("categoryApplyStatus");
+    const previewCtrl  = document.getElementById("categoryPreviewControls");
+
+    let es = null;
+    let currentJobId = null;
+    let previewResults = [];
+
+    function setRunning(running) {
+      btn.disabled = running;
+      stopBtn.style.display = running ? "inline-flex" : "none";
+    }
+
+    async function doRun(force = false) {
+      setRunning(true);
+      logContainer.innerHTML = "";
+      previewWrap.style.display = "none";
+      previewBody.innerHTML = "";
+      previewResults = [];
+      applyStatus.textContent = "";
+      progressWrap.style.display = "block";
+      logWrap.style.display = "block";
+      setProgress(progressBar, progressText, progressPct, 0, 0);
+      currentEl.textContent = "카테고리 분류 시작 중...";
+      setStatus(statusBadge, "running");
+
+      try {
+        const res = await fetch(CATEGORY_RUN_URL, {
+          method: "POST",
+          headers: { "X-CSRFToken": CSRF_TOKEN, "Content-Type": "application/json" },
+          body: JSON.stringify(force ? { force: true } : {}),
+        });
+        const data = await res.json();
+        if (res.status === 409) {
+          setRunning(false);
+          statusBadge.className = "status-badge";
+          if (confirm("진행 중인 카테고리 분류 작업이 있습니다.\n다시 작업을 진행하겠습니까?")) doRun(true);
+          return;
+        }
+        if (!res.ok) {
+          appendLog(logContainer, "error", { errorMsg: data.error || "알 수 없는 오류" });
+          setStatus(statusBadge, "failed");
+          setRunning(false);
+          return;
+        }
+        startStream(data.job_id);
+      } catch (e) {
+        appendLog(logContainer, "error", { errorMsg: "서버 연결 실패: " + e.message });
+        setStatus(statusBadge, "failed");
+        setRunning(false);
+      }
+    }
+
+    btn.addEventListener("click", () => { if (!btn.disabled) doRun(); });
+
+    stopBtn.addEventListener("click", async () => {
+      if (!currentJobId) return;
+      stopBtn.disabled = true;
+      try {
+        await fetch(STOP_BASE + currentJobId + "/", {
+          method: "POST",
+          headers: { "X-CSRFToken": CSRF_TOKEN },
+        });
+      } catch (_) {}
+      stopBtn.disabled = false;
+    });
+
+    function startStream(jobId) {
+      currentJobId = jobId;
+      if (es) es.close();
+      let isDone = false;
+      es = new EventSource(CATEGORY_STREAM + jobId + "/");
+
+      es.onmessage = (e) => {
+        const ev = JSON.parse(e.data);
+
+        if (ev.type === "start") {
+          appendLog(logContainer, "info", { errorMsg: `총 ${ev.total}권 분류 시작` });
+
+        } else if (ev.type === "progress") {
+          setProgress(progressBar, progressText, progressPct, ev.done, ev.total);
+          currentEl.textContent = ev.current ? `처리 중: ${ev.current}` : "";
+
+        } else if (ev.type === "log") {
+          if (ev.status === "success") {
+            const cats = (ev.categories || []).join(", ");
+            appendLog(logContainer, "success", { title: ev.title, difficulty: cats });
+          } else {
+            appendLog(logContainer, "error", { title: ev.title, errorMsg: ev.error });
+          }
+
+        } else if (ev.type === "cancelled") {
+          isDone = true;
+          currentEl.textContent = "";
+          appendLog(logContainer, "info", {
+            errorMsg: `중단됨 — ${ev.done}건 처리됨 (전체 ${ev.total}건 중)`,
+          });
+          setStatus(statusBadge, "cancelled");
+          es.close(); setRunning(false); currentJobId = null;
+
+        } else if (ev.type === "preview") {
+          isDone = true;
+          setProgress(progressBar, progressText, progressPct, ev.total, ev.total);
+          currentEl.textContent = "";
+          appendLog(logContainer, "info", {
+            errorMsg: `완료 — 성공: ${ev.done}건, 오류: ${ev.errors}건, 합계: ${ev.total}건`,
+          });
+          setStatus(statusBadge, ev.errors > 0 ? "failed" : "done");
+          es.close(); setRunning(false); currentJobId = null;
+          showPreview(ev.results || []);
+
+        } else if (ev.type === "fatal") {
+          isDone = true;
+          appendLog(logContainer, "error", { errorMsg: "치명적 오류: " + ev.error });
+          setStatus(statusBadge, "failed");
+          es.close(); setRunning(false); currentJobId = null;
+        }
+      };
+
+      es.onerror = () => {
+        if (isDone) return;
+        appendLog(logContainer, "error", { errorMsg: "스트림 연결이 끊겼습니다." });
+        setStatus(statusBadge, "failed");
+        es.close(); setRunning(false); currentJobId = null;
+      };
+    }
+
+    function showPreview(results) {
+      previewResults = results;
+      previewBody.innerHTML = "";
+      applyStatus.textContent = "";
+      selectAll.checked = true;
+
+      if (!results.length) {
+        noChanges.style.display = "block";
+        previewCtrl.style.display = "none";
+        previewWrap.style.display = "block";
+        return;
+      }
+
+      noChanges.style.display = "none";
+      previewCtrl.style.display = "flex";
+
+      results.forEach((r, i) => {
+        const oldLabel = r.old_categories.length ? r.old_categories.join(", ") : "(없음)";
+        const newLabel = r.new_categories.join(", ");
+
+        const tr = document.createElement("tr");
+        tr.style.borderBottom = "1px solid var(--border)";
+        tr.innerHTML = `
+          <td style="padding:10px 14px; text-align:center;">
+            <input type="checkbox" class="category-row-check" data-idx="${i}" checked
+              style="accent-color:var(--primary); cursor:pointer;">
+          </td>
+          <td style="padding:10px 14px;">${escHtml(r.title)}</td>
+          <td style="padding:10px 14px; color:var(--text-muted);">${escHtml(oldLabel)}</td>
+          <td style="padding:10px 14px; font-weight:700; color:var(--primary);">→ ${escHtml(newLabel)}</td>`;
+        previewBody.appendChild(tr);
+      });
+
+      previewWrap.style.display = "block";
+    }
+
+    selectAll.addEventListener("change", () => {
+      document.querySelectorAll(".category-row-check")
+        .forEach(cb => { cb.checked = selectAll.checked; });
+    });
+
+    previewBody.addEventListener("change", (e) => {
+      if (!e.target.classList.contains("category-row-check")) return;
+      const all     = previewBody.querySelectorAll(".category-row-check");
+      const checked = previewBody.querySelectorAll(".category-row-check:checked");
+      selectAll.checked = all.length === checked.length;
+    });
+
+    btnCancel.addEventListener("click", () => {
+      previewWrap.style.display = "none";
+      previewResults = [];
+    });
+
+    btnApply.addEventListener("click", async () => {
+      const items = [...previewBody.querySelectorAll(".category-row-check:checked")]
+        .map(cb => {
+          const r = previewResults[parseInt(cb.dataset.idx)];
+          return { book_list_id: r.book_list_id, categories: r.new_categories };
+        });
+
+      if (!items.length) {
+        applyStatus.style.color = "var(--text-muted)";
+        applyStatus.textContent = "적용할 항목이 없습니다.";
+        return;
+      }
+
+      btnApply.disabled = true;
+      btnCancel.disabled = true;
+      applyStatus.style.color = "var(--text-muted)";
+      applyStatus.textContent = "적용 중...";
+
+      try {
+        const res = await fetch(CATEGORY_APPLY_URL, {
+          method: "POST",
+          headers: { "X-CSRFToken": CSRF_TOKEN, "Content-Type": "application/json" },
+          body: JSON.stringify({ items }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          applyStatus.style.color = "#16a34a";
+          applyStatus.textContent = `✓ ${data.applied}건 적용 완료`;
+          previewResults = [];
+          setTimeout(() => { previewWrap.style.display = "none"; }, 2500);
+        } else {
+          applyStatus.style.color = "#dc2626";
+          applyStatus.textContent = "오류: " + (data.error || "알 수 없는 오류");
+        }
+      } catch (e) {
+        applyStatus.style.color = "#dc2626";
+        applyStatus.textContent = "서버 연결 실패";
+      } finally {
+        btnApply.disabled = false;
+        btnCancel.disabled = false;
+      }
+    });
+  })();
+
+  // ── 데이터 수집 섹션 ─────────────────────────────────────────
   createStreamHandler({
-    runUrl:       CATEGORY_RUN_URL,
-    streamBase:   CATEGORY_STREAM,
-    btn:          document.getElementById("btnCategory"),
-    stopBtn:      document.getElementById("btnCategoryStop"),
-    statusBadge:  document.getElementById("categoryStatus"),
-    progressWrap: document.getElementById("categoryProgressWrap"),
-    progressBar:  document.getElementById("categoryProgressBar"),
-    progressText: document.getElementById("categoryProgressText"),
-    progressPct:  document.getElementById("categoryProgressPct"),
-    currentEl:    document.getElementById("categoryCurrent"),
-    logWrap:      document.getElementById("categoryLogWrap"),
-    logContainer: document.getElementById("categoryLog"),
-    startLabel:   "카테고리 분류",
+    runUrl:       () => getCollectSource() === "yes24" ? YES24_RUN_URL    : COLLECT_RUN_URL,
+    streamBase:   () => getCollectSource() === "yes24" ? YES24_STREAM     : COLLECT_STREAM,
+    extraBody:    () => getCollectSource() === "yes24" ? { resume: true } : {},
+    btn:          document.getElementById("btnCollect"),
+    stopBtn:      document.getElementById("btnCollectStop"),
+    statusBadge:  document.getElementById("collectStatus"),
+    progressWrap: document.getElementById("collectProgressWrap"),
+    progressBar:  document.getElementById("collectProgressBar"),
+    progressText: document.getElementById("collectProgressText"),
+    progressPct:  document.getElementById("collectProgressPct"),
+    currentEl:    document.getElementById("collectCurrent"),
+    logWrap:      document.getElementById("collectLogWrap"),
+    logContainer: document.getElementById("collectLog"),
+    startLabel:   "데이터 수집",
   });
+
+  // ── 썸네일 일괄 갱신 섹션 ────────────────────────────────────
+  (function () {
+    const btn        = document.getElementById("btnSyncThumb");
+    const statusBadge = document.getElementById("thumbSyncStatus");
+
+    btn.addEventListener("click", async () => {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      statusBadge.className = "status-badge running";
+      statusBadge.textContent = "갱신 시작 중...";
+
+      try {
+        const res  = await fetch(SYNC_THUMBNAILS_URL, {
+          method: "POST",
+          headers: { "X-CSRFToken": CSRF_TOKEN },
+        });
+        const data = await res.json();
+        if (data.ok) {
+          statusBadge.className = "status-badge done";
+          statusBadge.textContent = data.message || "백그라운드 갱신 시작됨";
+        } else {
+          statusBadge.className = "status-badge failed";
+          statusBadge.textContent = data.message || "이미 갱신 중입니다.";
+        }
+      } catch (e) {
+        statusBadge.className = "status-badge failed";
+        statusBadge.textContent = "서버 연결 실패";
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  })();
+
+  // ── 통계 카드 팝오버 ─────────────────────────────────────────
+  (function () {
+    const overlay  = document.getElementById("statPopoverOverlay");
+    const titleEl  = document.getElementById("statPopoverTitle");
+    const countEl  = document.getElementById("statPopoverCount");
+    const body     = document.getElementById("statPopoverBody");
+    const closeBtn = document.getElementById("statPopoverClose");
+
+    function closePopover() {
+      overlay.classList.remove("open");
+      body.innerHTML = '<p class="stat-popover-loading">불러오는 중...</p>';
+    }
+
+    closeBtn.addEventListener("click", closePopover);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) closePopover(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePopover(); });
+
+    document.querySelectorAll(".stat-card-issue[data-popover-type]").forEach(card => {
+      card.addEventListener("click", async () => {
+        const type  = card.dataset.popoverType;
+        const title = card.dataset.popoverTitle;
+        titleEl.textContent = title;
+        countEl.textContent = "";
+        body.innerHTML = '<p class="stat-popover-loading">불러오는 중...</p>';
+        overlay.classList.add("open");
+
+        try {
+          const res  = await fetch(BOOKS_LIST_URL + "?type=" + type);
+          const data = await res.json();
+
+          if (!res.ok || !data.books) {
+            body.innerHTML = `<p class="stat-popover-empty">오류: ${escHtml(data.error || "알 수 없는 오류")}</p>`;
+            return;
+          }
+
+          countEl.textContent = `(${data.books.length}권)`;
+
+          if (!data.books.length) {
+            body.innerHTML = '<p class="stat-popover-empty">해당 도서가 없습니다.</p>';
+            return;
+          }
+
+          body.innerHTML = data.books.map(b => `
+            <a href="${escHtml(b.url)}" class="stat-popover-item" target="_blank" rel="noopener">
+              <span class="stat-popover-code">${escHtml(b.book_code)}</span>
+              <span class="stat-popover-title">${escHtml(b.title)}</span>
+            </a>`).join("");
+        } catch (e) {
+          body.innerHTML = `<p class="stat-popover-empty">서버 연결 실패: ${escHtml(e.message)}</p>`;
+        }
+      });
+    });
+  })();
 </script>
 {% endblock %}

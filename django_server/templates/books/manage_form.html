@@ -126,7 +126,82 @@
     font-size: 0.88rem;
     margin-bottom: 20px;
   }
+
+  /* ── 중복 도서 경고 ── */
+  .duplicate-alert {
+    display: flex;
+    gap: 14px;
+    background: #fffbeb;
+    border: 1.5px solid #f59e0b;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+  }
+  .duplicate-alert-icon {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    color: #d97706;
+    margin-top: 1px;
+  }
+  .duplicate-alert-body { flex: 1; min-width: 0; }
+  .duplicate-alert-title {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: #92400e;
+    margin-bottom: 6px;
+  }
+  .duplicate-alert-desc {
+    font-size: 0.85rem;
+    color: #78350f;
+    margin-bottom: 10px;
+    line-height: 1.5;
+  }
+  .duplicate-book-detail {
+    background: #fef3c7;
+    border: 1px solid #fcd34d;
+    border-radius: 7px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    font-size: 0.85rem;
+    color: #78350f;
+  }
+  .duplicate-book-detail strong { font-weight: 700; display: block; margin-bottom: 3px; }
+  .duplicate-book-detail .meta { color: #92400e; }
+  .duplicate-book-detail .codes { margin-top: 5px; font-size: 0.82rem; }
+  .duplicate-alert-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .btn-link-confirm {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: #d97706;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .2s;
+  }
+  .btn-link-confirm:hover { background: #b45309; }
+  .duplicate-alert-hint { font-size: 0.82rem; color: #92400e; }
+
   .form-actions { display: flex; gap: 10px; padding-top: 8px; }
+
+  /* ── 링크 수집 행 ── */
+  .scrape-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 14px 16px;
+    background: var(--bg);
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 18px;
+  }
+  .scrape-row .form-input { flex: 1; min-width: 0; }
+  .scrape-status { font-size: 0.84rem; flex-shrink: 0; }
 
   @media (max-width: 640px) {
     .form-card { padding: 20px 16px; }
@@ -139,6 +214,7 @@
     .form-actions { flex-direction: column; }
     .form-actions .btn-primary,
     .form-actions .btn-ghost { width: 100%; justify-content: center; text-align: center; }
+    .scrape-row { flex-wrap: wrap; }
   }
 
   @media (max-width: 400px) {
@@ -170,11 +246,47 @@
 <div class="form-error">{{ error }}</div>
 {% endif %}
 
+{% if duplicate_book_list %}
+<div class="duplicate-alert">
+  <div class="duplicate-alert-icon">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+      <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+    </svg>
+  </div>
+  <div class="duplicate-alert-body">
+    <p class="duplicate-alert-title">이미 동일한 도서가 존재합니다</p>
+    <p class="duplicate-alert-desc">
+      입력하신 도서명·저자·출판사·판차가 동일한 도서가 이미 등록되어 있습니다.<br>
+      아래 기존 도서로 연결하거나, 폼의 내용을 변경하여 다시 저장하세요.
+    </p>
+    <div class="duplicate-book-detail">
+      <strong>{{ duplicate_book_list.full_title }}</strong>
+      <span class="meta">{{ duplicate_book_list.author.name }} · {{ duplicate_book_list.publisher.name }}</span>
+      {% if duplicate_books %}
+      <div class="codes">연결된 도서 코드:
+        {% for b in duplicate_books %}[{{ b.book_code }}]{% if not forloop.last %} {% endif %}{% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    <div class="duplicate-alert-actions">
+      <button type="button" class="btn-link-confirm" onclick="submitWithConfirmLink()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        기존 도서로 연결하기
+      </button>
+      <span class="duplicate-alert-hint">또는 아래 폼을 수정하여 다시 저장하세요.</span>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 <!-- ── 도서 정보 폼 ── -->
 <div class="form-card">
   <form method="post" id="bookForm">
     {% csrf_token %}
+    <input type="hidden" name="confirm_link" id="confirmLinkInput" value="">
 
     <!-- 기본 정보 -->
     <div class="form-section">
@@ -236,6 +348,14 @@
     <!-- 수집 정보 -->
     <div class="form-section">
       <p class="form-section-title">수집 정보</p>
+
+      <!-- URL 수집 행 -->
+      <div class="scrape-row">
+        <input class="form-input" type="url" id="scrapeUrl" placeholder="YES24 링크를 붙여넣으세요 (예: https://www.yes24.com/Product/Goods/12345)">
+        <button type="button" class="btn-primary" id="scrapeBtn" style="flex-shrink:0;">수집</button>
+        <span class="scrape-status" id="scrapeStatus"></span>
+      </div>
+
       <div class="form-grid">
         <div class="form-group">
           <label class="form-label" for="difficulty">난이도</label>
@@ -260,9 +380,16 @@
 
         <div class="form-group form-col-full">
           <label class="form-label" for="thumbnail_url">썸네일 URL</label>
-          <input class="form-input" type="url" id="thumbnail_url" name="thumbnail_url"
-                 placeholder="https://..."
-                 value="{{ form_data.thumbnail_url|default:'' }}">
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input class="form-input" type="url" id="thumbnail_url" name="thumbnail_url"
+                   placeholder="https://..."
+                   value="{{ form_data.thumbnail_url|default:'' }}" style="flex:1;">
+            {% if mode == "edit" %}
+            <button type="button" id="btnThumbApply" class="btn-primary"
+                    style="flex-shrink:0; white-space:nowrap;">적용</button>
+            <span id="thumbApplyStatus" style="font-size:0.82rem; flex-shrink:0;"></span>
+            {% endif %}
+          </div>
         </div>
 
         <div class="form-group form-col-full">
@@ -324,6 +451,12 @@
 
 {% block extra_js %}
 <script>
+  // ── 중복 도서 연결 확인 ──────────────────────────────────────
+  function submitWithConfirmLink() {
+    document.getElementById("confirmLinkInput").value = "true";
+    document.getElementById("bookForm").submit();
+  }
+
   // ── 카테고리 체크박스 토글 ──────────────────────────────────
   document.querySelectorAll(".checkbox-label").forEach(label => {
     const cb = label.querySelector("input[type=checkbox]");
@@ -333,5 +466,119 @@
     });
   });
 
+  // ── URL 수집 ─────────────────────────────────────────────
+  (function () {
+    const btn    = document.getElementById("scrapeBtn");
+    const urlIn  = document.getElementById("scrapeUrl");
+    const status = document.getElementById("scrapeStatus");
+    const SCRAPE_URL = "{% url 'books:scrape_url' %}";
+
+    function setStatus(msg, color) {
+      status.textContent = msg;
+      status.style.color = color || "var(--text-sub)";
+    }
+
+    function fillField(id, value) {
+      if (value === undefined || value === null) return;
+      const el = document.getElementById(id);
+      if (el) el.value = value;
+    }
+
+    function fillDifficulty(value) {
+      if (!value) return;
+      const sel = document.getElementById("difficulty");
+      if (!sel) return;
+      for (const opt of sel.options) {
+        if (opt.value === value) { sel.value = value; return; }
+      }
+    }
+
+    btn.addEventListener("click", async () => {
+      const url = urlIn.value.trim();
+      if (!url) { setStatus("URL을 입력해주세요.", "var(--red)"); return; }
+
+      btn.disabled = true;
+      setStatus("수집 중…", "var(--text-muted)");
+
+      try {
+        const res = await fetch(SCRAPE_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": document.querySelector("[name=csrfmiddlewaretoken]").value,
+          },
+          body: JSON.stringify({ url }),
+        });
+        const json = await res.json();
+
+        if (json.status === "ok") {
+          const d = json.data || {};
+          fillField("title",            d.title);
+          fillField("subtitle",         d.subtitle);
+          fillField("edition",          d.edition);
+          fillField("author",           d.author);
+          fillField("publisher",        d.publisher);
+          fillField("publication_year", d.publication_year);
+          fillField("thumbnail_url",    d.thumbnail_url);
+          fillField("description",      d.description);
+          fillField("toc",              d.toc);
+          fillDifficulty(d.difficulty);
+          setStatus("자동 입력 완료", "var(--green)");
+        } else if (json.status === "not_implemented") {
+          alert("알라딘 수집은 아직 미구현입니다.");
+          setStatus("");
+        } else if (json.status === "unsupported") {
+          alert("현재 YES24만 이용 가능합니다.");
+          setStatus("");
+        } else {
+          setStatus("오류: " + (json.message || "알 수 없는 오류"), "var(--red)");
+        }
+      } catch (e) {
+        setStatus("네트워크 오류: " + e.message, "var(--red)");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  })();
+
+  // ── 썸네일 URL 즉시 적용 (수정 모드) ────────────────────────
+  (function () {
+    const btn    = document.getElementById("btnThumbApply");
+    const status = document.getElementById("thumbApplyStatus");
+    if (!btn) return;
+
+    btn.addEventListener("click", async () => {
+      const url = document.getElementById("thumbnail_url").value.trim();
+      if (!url) { status.style.color = "#dc2626"; status.textContent = "URL을 입력하세요."; return; }
+
+      btn.disabled = true;
+      status.style.color = "var(--text-muted)";
+      status.textContent = "다운로드 중…";
+
+      try {
+        const res = await fetch("{% url 'books:apply_thumbnail' book.pk %}", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": document.querySelector("[name=csrfmiddlewaretoken]").value,
+          },
+          body: JSON.stringify({ thumbnail_url: url }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          status.style.color = "#16a34a";
+          status.textContent = "✓ 적용 완료";
+        } else {
+          status.style.color = "#dc2626";
+          status.textContent = "오류: " + (data.error || "알 수 없는 오류");
+        }
+      } catch (e) {
+        status.style.color = "#dc2626";
+        status.textContent = "연결 실패";
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  })();
 </script>
 {% endblock %}
