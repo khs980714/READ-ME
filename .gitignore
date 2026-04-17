@@ -39,4 +39,4 @@ fastapi_server/tests/load_report.html
 fastapi_server/tests/load_stats_*.csv
 
 # 로컬 전용 메모
-앞으로 할 일.md
+todo.md

@@ -10,7 +10,6 @@ PostgreSQL 연결 (psycopg2 + pgvector)
 import asyncio
 import re
 from contextlib import contextmanager
-from datetime import datetime
 
 import psycopg2
 import psycopg2.pool
@@ -74,9 +73,16 @@ _VECTOR_SEARCH_SQL = """
     )
       AND 1 - (be.embedding <=> %s::vector) >= %s
       {difficulty_filter}
+      {category_filter}
     ORDER BY score DESC
     LIMIT %s
 """
+
+_CATEGORY_FILTER_SQL = """AND EXISTS (
+        SELECT 1 FROM book_list_categories blc
+        JOIN categories c ON c.id = blc.category_id
+        WHERE blc.book_list_id = bl.id AND c.name = %s
+    )"""
 
 
 def _rows_to_dicts(rows) -> list[dict]:
@@ -103,50 +109,27 @@ def _make_sort_key(is_certification: bool = False):
     """정렬 키 팩토리. 항상 (primary, secondary) 튜플을 반환합니다.
 
     자격증 쿼리 (is_certification=True):
-      연도를 1차 키로 사용 → 2025 도서가 점수와 무관하게 항상 2024 도서 앞에 위치.
-      같은 연도 내에서는 score(+개정판 보너스) 순으로 정렬.
+      연도를 1차 키로 사용 → 최신 출판 도서가 점수와 무관하게 항상 앞에 위치.
+      같은 연도 내에서는 순수 코사인 유사도(score) 순으로 정렬.
         primary  = publication_year (0 → 연도 미상, 가장 낮은 우선순위)
-        secondary = score + edition_boost
+        secondary = score
 
     일반 쿼리 (is_certification=False):
-      연도 가중치를 score에 더해 단일 기준으로 정렬.
-        primary  = 0 (고정, 실질적으로 secondary만 사용)
-        secondary = score + year_boost + edition_boost
-          현재 연도 이상 → +0.05
-          1년 전         → +0.03
-          2~3년 전       → +0.01
-          4년 이상 전    → +0.00
-
-    개정판 보너스: edition 필드가 비어있지 않으면 +0.02
+      연도 보정 없이 순수 코사인 유사도(score)만 사용.
+        primary  = 0 (고정)
+        secondary = score
     """
-    current_year = datetime.now().year
-
     def _key(book: dict) -> tuple:
-        # 1차: DB의 publication_year, 2차: 제목에서 추출
-        year = book.get("publication_year")
-        if not year:
-            match = _YEAR_RE.search(book["title"])
-            if match:
-                year = int(match.group())
-
-        edition_boost = 0.02 if book.get("edition") else 0.0
-        score = book["score"] + edition_boost
+        score = book["score"]
 
         if is_certification:
-            # 연도를 독립적인 1차 정렬 키로 사용
-            # → 연도가 다르면 score 차이와 무관하게 최신 연도가 항상 앞에 위치
-            year_key = year or 0
-            return (year_key, score)
+            year = book.get("publication_year")
+            if not year:
+                match = _YEAR_RE.search(book["title"])
+                if match:
+                    year = int(match.group())
+            return (year or 0, score)
         else:
-            # score에 연도 가중치를 더해 단일 기준으로 정렬
-            if year:
-                diff = year - current_year
-                if diff >= 0:
-                    score += 0.05
-                elif diff == -1:
-                    score += 0.03
-                elif diff >= -3:
-                    score += 0.01
             return (0, score)
 
     return _key
@@ -158,14 +141,22 @@ def _vector_search_sync(
     limit: int,
     difficulty: str | None = None,
     is_certification: bool = False,
+    category: str | None = None,
 ) -> list[dict]:
-    """코사인 유사도 기반 도서 벡터 검색 (동기). difficulty 지정 시 필터 적용."""
+    """코사인 유사도 기반 도서 벡터 검색 (동기). difficulty/category 지정 시 필터 적용."""
+    difficulty_filter = "AND bl.difficulty = %s" if difficulty else ""
+    category_filter = _CATEGORY_FILTER_SQL if category else ""
+    sql = _VECTOR_SEARCH_SQL.format(
+        difficulty_filter=difficulty_filter,
+        category_filter=category_filter,
+    )
+
+    params: list = [query_embedding, query_embedding, threshold]
     if difficulty:
-        sql = _VECTOR_SEARCH_SQL.format(difficulty_filter="AND bl.difficulty = %s")
-        params = (query_embedding, query_embedding, threshold, difficulty, limit)
-    else:
-        sql = _VECTOR_SEARCH_SQL.format(difficulty_filter="")
-        params = (query_embedding, query_embedding, threshold, limit)
+        params.append(difficulty)
+    if category:
+        params.append(category)
+    params.append(limit)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -200,10 +191,11 @@ async def vector_search(
     threshold: float,
     limit: int,
     is_certification: bool = False,
+    category: str | None = None,
 ) -> list[dict]:
     """코사인 유사도 기반 도서 벡터 검색 (async)."""
     return await asyncio.to_thread(
-        _vector_search_sync, query_embedding, threshold, limit, None, is_certification
+        _vector_search_sync, query_embedding, threshold, limit, None, is_certification, category
     )
 
 

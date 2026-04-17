@@ -156,12 +156,27 @@ async def retrieve_books_by_keyword(question: str) -> tuple[list, str]:
     return books, keyword
 
 
+_CERTIFICATION_KEYWORDS = re.compile(
+    r'자격증|수험서|기출(?:문제)?|필기\s*(?:시험|준비|대비)|실기\s*(?:시험|준비|대비)|'
+    r'SQLD|ITQ|MOS|CISA|리눅스마스터|정보보안기사|컴퓨터활용|컴활|워드프로세서',
+    re.IGNORECASE,
+)
+
+
+def _is_certification_query(question: str) -> bool:
+    """질문이 자격증 취득 관련인지 판별합니다 (취업·포트폴리오와 구분)."""
+    return bool(
+        _CERTIFICATION_KEYWORDS.search(question) or extract_certification_name(question)
+    )
+
+
 async def retrieve_books(message: str, question_type: str) -> list:
     """질문 임베딩 → 벡터 검색 (유사도 내림차순). 질문 유형별 threshold 적용.
 
     career_certification 유형:
       - 최신 연도 가중치를 강화하여 최신 수험서를 우선 노출.
       - 질문에 자격증명(예: 정보처리기사)이 명시된 경우, 다른 등급 자격증 도서를 후처리 필터링.
+      - 자격증 관련 질문이면 자격증 카테고리로 범위를 좁혀 검색.
     """
     threshold = _THRESHOLD_MAP.get(
         question_type,
@@ -169,12 +184,28 @@ async def retrieve_books(message: str, question_type: str) -> list:
     )
     q_embedding = await get_embeddings(message, input_type="query")
     is_certification = question_type == "career_certification"
+
+    # 자격증 질문이면 자격증 카테고리 필터 적용
+    category_filter: str | None = None
+    if is_certification and _is_certification_query(message):
+        category_filter = "자격증"
+
     books = await vector_search(
         query_embedding=q_embedding,
         threshold=threshold,
         limit=settings.RECOMMENDATION_MAX,
         is_certification=is_certification,
+        category=category_filter,
     )
+
+    # 카테고리 필터 후 결과가 없으면 필터 없이 재검색 (안전 fallback)
+    if is_certification and category_filter and not books:
+        books = await vector_search(
+            query_embedding=q_embedding,
+            threshold=threshold,
+            limit=settings.RECOMMENDATION_MAX,
+            is_certification=is_certification,
+        )
 
     if is_certification:
         cert_name = extract_certification_name(message)

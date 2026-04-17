@@ -31,6 +31,16 @@ def _build_messages(inputs: dict) -> list:
     books = inputs.get("books", [])
     history = inputs.get("history", [])
 
+    # 동일 제목 도서 dedup: LLM에는 제목당 하나만 전달 (최신 연도·높은 점수 우선)
+    seen_titles: set[str] = set()
+    deduped: list[dict] = []
+    for b in books:
+        t = b["title"]
+        if t not in seen_titles:
+            seen_titles.add(t)
+            deduped.append(b)
+    books = deduped
+
     def _format_book(b: dict) -> str:
         code = b.get("book_code") or "D-{:03d}".format(b["book_list_id"])
         title = b["title"]
@@ -62,7 +72,7 @@ def _build_messages(inputs: dict) -> list:
 
     user_content = f"""질문: {question}{cert_notice}
 
-검색된 도서 목록 (최신 연도·개정판 우선 정렬):
+검색된 도서 목록 (최신 연도 우선 정렬):
 {book_list if book_list else '(검색된 도서 없음)'}
 
 위 목록에서 자격증 준비 또는 포트폴리오 완성에 적합한 도서를 추천하고,

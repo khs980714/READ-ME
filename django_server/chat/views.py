@@ -93,7 +93,9 @@ def send_message(request):
             continue
         recommendations_out.append({
             "id": book.pk,
+            "book_code": book.book_code,
             "title": book.book_list.title,
+            "edition": book.book_list.edition,
             "author": book.book_list.get_author_display(),
             "publisher": book.book_list.publisher.name,
             "difficulty": book.book_list.difficulty,
@@ -205,7 +207,9 @@ def _enrich_recommendations(raw_recs: list) -> list:
             continue
         result.append({
             "id": book.pk,
+            "book_code": book.book_code,
             "title": book.book_list.title,
+            "edition": book.book_list.edition,
             "author": book.book_list.get_author_display(),
             "publisher": book.book_list.publisher.name,
             "difficulty": book.book_list.difficulty,

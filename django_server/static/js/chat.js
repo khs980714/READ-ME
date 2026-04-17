@@ -3,11 +3,14 @@
  * AJAX / SSE 스트리밍 챗봇 메시지 송수신 및 추천 카드 렌더링
  */
 
-const VISIBLE_CARDS  = 3;
+const VISIBLE_CARDS   = 3;
 const MODAL_PAGE_SIZE = 10;
 
-let _modalAllRecs = [];
-let _modalPage    = 0;
+// 모달 상태
+let _modalAllGroups = [];   // [{rep, editions:[...]}, ...] 전체 그룹 목록
+let _modalPage      = 0;
+let _modalState     = "list"; // "list" | "detail"
+let _detailGroup    = null;   // 현재 상세보기 중인 그룹
 
 const chatMessages  = document.getElementById("chatMessages");
 const chatInput     = document.getElementById("chatInput");
@@ -17,7 +20,10 @@ const streamToggle  = document.getElementById("streamToggle");
 const streamStatus  = document.getElementById("streamStatus");
 const moreModal     = document.getElementById("moreModal");
 const modalClose    = document.getElementById("modalClose");
+const modalBack     = document.getElementById("modalBack");
 const modalBookList = document.getElementById("modalBookList");
+const modalTitle    = document.getElementById("modalTitle");
+const modalPagination = document.getElementById("modalPagination");
 
 // ── marked 설정 ───────────────────────────────────────────
 if (typeof marked !== "undefined") {
@@ -138,7 +144,6 @@ async function handleNormalSend(content) {
 
 // ── 스트리밍 모드 (SSE) ───────────────────────────────────
 async function handleStreamSend(content) {
-  // 빈 말풍선 생성
   const { wrap, body, bubble } = createStreamBubble();
   chatMessages.appendChild(wrap);
   scrollBottom();
@@ -169,7 +174,6 @@ async function handleStreamSend(content) {
 
       buffer += decoder.decode(value, { stream: true });
 
-      // SSE 이벤트 단위(\n\n) 파싱
       let boundary;
       while ((boundary = buffer.indexOf("\n\n")) !== -1) {
         const block = buffer.slice(0, boundary);
@@ -182,7 +186,6 @@ async function handleStreamSend(content) {
 
           if (event.type === "answer_chunk") {
             if (firstChunk) {
-              // 첫 토큰 수신 시 타이핑 표시 제거
               bubble.classList.remove("streaming-waiting");
               firstChunk = false;
             }
@@ -206,7 +209,6 @@ async function handleStreamSend(content) {
 
           } else if (event.type === "error") {
             bubble.classList.remove("streaming-waiting");
-            // content에 구체적인 오류 메시지가 없으면 기본 안내 표시
             bubble.textContent = event.content || "오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
           }
         }
@@ -305,8 +307,36 @@ function appendTyping() {
   return wrap;
 }
 
-// ── 추천 카드 ────────────────────────────────────────────
+// ── 추천 목록 → 제목별 그룹화 ─────────────────────────────
+function _codeNum(code) {
+  if (!code) return Infinity;
+  const m = code.match(/(\d+)$/);
+  return m ? parseInt(m[1], 10) : Infinity;
+}
+
+function groupRecommendations(recs) {
+  const map = new Map(); // title → [{rec}, ...]
+  for (const rec of recs) {
+    const key = rec.title;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(rec);
+  }
+  // 각 그룹 내부: book_code 오름차순 정렬 → 첫 번째가 대표
+  const groups = [];
+  for (const editions of map.values()) {
+    editions.sort((a, b) => _codeNum(a.book_code) - _codeNum(b.book_code));
+    groups.push({ rep: editions[0], editions });
+  }
+  // 그룹 순서: 대표의 rank 오름차순
+  groups.sort((a, b) => a.rep.rank - b.rep.rank);
+  return groups;
+}
+
+// ── 추천 카드 섹션 렌더링 ────────────────────────────────
 function renderRecommendations(recs, qtype) {
+  const groups = groupRecommendations(recs);
+  _modalAllGroups = groups; // 모달에서 재사용
+
   const section = document.createElement("div");
   section.className = "rec-section";
 
@@ -318,34 +348,41 @@ function renderRecommendations(recs, qtype) {
   const cardsWrap = document.createElement("div");
   cardsWrap.className = "rec-cards";
 
-  // 항상 최대 3권만 노출, 초과분은 더보기 버튼으로 모달에 표시
-  const visible = recs.slice(0, VISIBLE_CARDS);
-  visible.forEach((rec) => cardsWrap.appendChild(makeCard(rec)));
+  const visibleGroups = groups.slice(0, VISIBLE_CARDS);
+  visibleGroups.forEach((g) => {
+    cardsWrap.appendChild(makeGroupCard(g, groups));
+  });
   section.appendChild(cardsWrap);
 
-  if (recs.length > VISIBLE_CARDS) {
+  if (groups.length > VISIBLE_CARDS) {
     const moreBtn = document.createElement("button");
     moreBtn.className = "btn-more";
     moreBtn.textContent = `더보기 (총 ${recs.length}권)`;
-    moreBtn.addEventListener("click", () => openModal(recs));
+    moreBtn.addEventListener("click", () => openListModal(groups));
     section.appendChild(moreBtn);
   }
 
   return section;
 }
 
-function makeCard(rec) {
-  const url = BOOK_DETAIL_URL.replace("{id}", rec.id);
-  const a = document.createElement("a");
-  a.className = "rec-card";
-  a.href = url;
+// ── 추천 카드 (그룹 대표) ────────────────────────────────
+function makeGroupCard(group, allGroups) {
+  const { rep, editions } = group;
+  const div = document.createElement("div");
+  div.className = "rec-card";
+  div.setAttribute("role", "button");
+  div.setAttribute("tabindex", "0");
+  div.addEventListener("click", () => openDetailModal(group, allGroups));
+  div.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") openDetailModal(group, allGroups);
+  });
 
   const thumb = document.createElement("div");
   thumb.className = "rec-card-thumb";
-  if (rec.thumbnail_url) {
+  if (rep.thumbnail_url) {
     const img = document.createElement("img");
-    img.src = rec.thumbnail_url;
-    img.alt = rec.title;
+    img.src = rep.thumbnail_url;
+    img.alt = rep.title;
     thumb.appendChild(img);
   } else {
     const ph = document.createElement("div");
@@ -355,10 +392,10 @@ function makeCard(rec) {
     </svg>`;
     thumb.appendChild(ph);
   }
-  if (rec.rank) {
+  if (rep.rank) {
     const rankBadge = document.createElement("span");
     rankBadge.className = "rec-card-rank";
-    rankBadge.textContent = `#${rec.rank}`;
+    rankBadge.textContent = `#${rep.rank}`;
     thumb.appendChild(rankBadge);
   }
 
@@ -367,60 +404,74 @@ function makeCard(rec) {
 
   const title = document.createElement("div");
   title.className = "rec-card-title";
-  title.textContent = rec.title;
+  title.textContent = rep.title;
 
   const author = document.createElement("div");
   author.className = "rec-card-author";
-  author.textContent = rec.author;
+  author.textContent = rep.author;
 
   const meta = document.createElement("div");
   meta.className = "rec-card-meta";
-  if (rec.difficulty) {
+  if (rep.difficulty) {
     const badge = document.createElement("span");
-    badge.className = `badge badge--${rec.difficulty}`;
-    badge.textContent = rec.difficulty;
+    badge.className = `badge badge--${rep.difficulty}`;
+    badge.textContent = rep.difficulty;
     meta.appendChild(badge);
   }
-  if (rec.score != null) {
+  if (rep.score != null) {
     const scoreEl = document.createElement("span");
     scoreEl.className = "rec-card-score";
-    scoreEl.textContent = `유사도 ${Math.round(rec.score * 100)}%`;
+    scoreEl.textContent = `유사도 ${Math.round(rep.score * 100)}%`;
     meta.appendChild(scoreEl);
+  }
+  // 판차 뱃지 (복수 edition)
+  if (editions.length > 1) {
+    const edBadge = document.createElement("span");
+    edBadge.className = "rec-card-edition-count";
+    edBadge.textContent = `${editions.length}종`;
+    meta.appendChild(edBadge);
   }
 
   info.appendChild(title);
   info.appendChild(author);
   info.appendChild(meta);
 
-  a.appendChild(thumb);
-  a.appendChild(info);
-  return a;
+  div.appendChild(thumb);
+  div.appendChild(info);
+  return div;
 }
 
-// ── 모달 ────────────────────────────────────────────────
-const modalTitle = document.getElementById("modalTitle");
-const modalPagination = document.getElementById("modalPagination");
-
-function openModal(recs) {
-  _modalAllRecs = recs;
-  _modalPage    = 0;
-  modalTitle.textContent = `도서 목록 (총 ${recs.length}권)`;
-  renderModalPage();
+// ── 모달: 목록(더보기) 열기 ──────────────────────────────
+function openListModal(groups) {
+  _modalAllGroups = groups;
+  _modalPage      = 0;
+  _modalState     = "list";
+  _detailGroup    = null;
+  modalBack.hidden = true;
+  modalTitle.textContent = `도서 목록 (총 ${groups.reduce((s, g) => s + g.editions.length, 0)}권)`;
+  renderModalListPage();
   moreModal.hidden = false;
   document.body.style.overflow = "hidden";
 }
 
-function renderModalPage() {
-  const total      = _modalAllRecs.length;
+function renderModalListPage() {
+  const total      = _modalAllGroups.length;
   const totalPages = Math.ceil(total / MODAL_PAGE_SIZE);
   const start      = _modalPage * MODAL_PAGE_SIZE;
-  const pageRecs   = _modalAllRecs.slice(start, start + MODAL_PAGE_SIZE);
+  const pageGroups = _modalAllGroups.slice(start, start + MODAL_PAGE_SIZE);
 
   modalBookList.innerHTML = "";
-  pageRecs.forEach((rec) => {
-    const card = makeCard(rec);
-    card.style.width = "100%";
-    modalBookList.appendChild(card);
+  pageGroups.forEach((g) => {
+    // makeGroupCard의 click 이벤트를 목록용으로 오버라이드
+    const c = makeGroupCard(g, _modalAllGroups);
+    c.style.width = "100%";
+    // 기존 click 리스너를 제거하고 목록→상세 전환 리스너 추가
+    const clone = c.cloneNode(true);
+    clone.addEventListener("click", () => openDetailFromList(g));
+    clone.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") openDetailFromList(g);
+    });
+    modalBookList.appendChild(clone);
   });
   modalBookList.scrollTop = 0;
 
@@ -431,7 +482,7 @@ function renderModalPage() {
   prev.className = "btn-page";
   prev.textContent = "이전";
   prev.disabled = _modalPage === 0;
-  prev.addEventListener("click", () => { _modalPage--; renderModalPage(); });
+  prev.addEventListener("click", () => { _modalPage--; renderModalListPage(); });
 
   const info = document.createElement("span");
   info.className = "modal-page-info";
@@ -441,12 +492,125 @@ function renderModalPage() {
   next.className = "btn-page";
   next.textContent = "다음";
   next.disabled = _modalPage >= totalPages - 1;
-  next.addEventListener("click", () => { _modalPage++; renderModalPage(); });
+  next.addEventListener("click", () => { _modalPage++; renderModalListPage(); });
 
   modalPagination.appendChild(prev);
   modalPagination.appendChild(info);
   modalPagination.appendChild(next);
 }
+
+// ── 모달: 상세보기 열기 ──────────────────────────────────
+function openDetailModal(group, allGroups) {
+  _modalAllGroups = allGroups || _modalAllGroups;
+  _detailGroup    = group;
+  _modalState     = "detail";
+  modalBack.hidden = false;
+  modalTitle.textContent = group.rep.title;
+  renderModalDetail(group);
+  moreModal.hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+function openDetailFromList(group) {
+  _detailGroup = group;
+  _modalState  = "detail";
+  modalBack.hidden = false;
+  modalTitle.textContent = group.rep.title;
+  renderModalDetail(group);
+}
+
+function renderModalDetail(group) {
+  const { rep, editions } = group;
+
+  modalBookList.innerHTML = "";
+  modalPagination.innerHTML = "";
+
+  const detail = document.createElement("div");
+  detail.className = "book-detail-view";
+
+  // 상단: 썸네일 + 기본 정보
+  const header = document.createElement("div");
+  header.className = "book-detail-header";
+
+  const thumb = document.createElement("div");
+  thumb.className = "book-detail-thumb";
+  if (rep.thumbnail_url) {
+    const img = document.createElement("img");
+    img.src = rep.thumbnail_url;
+    img.alt = rep.title;
+    thumb.appendChild(img);
+  } else {
+    thumb.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>
+    </svg>`;
+  }
+
+  const meta = document.createElement("div");
+  meta.className = "book-detail-meta";
+
+  const metaTitle = document.createElement("div");
+  metaTitle.className = "book-detail-title";
+  metaTitle.textContent = rep.title;
+
+  const metaAuthor = document.createElement("div");
+  metaAuthor.className = "book-detail-author";
+  metaAuthor.textContent = `${rep.author} · ${rep.publisher}`;
+
+  const metaBadges = document.createElement("div");
+  metaBadges.className = "book-detail-badges";
+  if (rep.difficulty) {
+    const b = document.createElement("span");
+    b.className = `badge badge--${rep.difficulty}`;
+    b.textContent = rep.difficulty;
+    metaBadges.appendChild(b);
+  }
+  if (rep.score != null) {
+    const s = document.createElement("span");
+    s.className = "rec-card-score";
+    s.textContent = `유사도 ${Math.round(rep.score * 100)}%`;
+    metaBadges.appendChild(s);
+  }
+
+  meta.appendChild(metaTitle);
+  meta.appendChild(metaAuthor);
+  meta.appendChild(metaBadges);
+
+  header.appendChild(thumb);
+  header.appendChild(meta);
+  detail.appendChild(header);
+
+  // 판차 목록
+  const edSection = document.createElement("div");
+  edSection.className = "book-detail-editions";
+
+  const edLabel = document.createElement("div");
+  edLabel.className = "book-detail-editions-label";
+  edLabel.textContent = editions.length > 1 ? "판차 목록" : "도서 링크";
+  edSection.appendChild(edLabel);
+
+  editions.forEach((ed) => {
+    const link = document.createElement("a");
+    link.className = "book-edition-link";
+    link.href = BOOK_DETAIL_URL.replace("{id}", ed.id);
+    link.textContent = ed.edition
+      ? `${ed.edition}  (${ed.book_code})`
+      : `자세히 보기  (${ed.book_code})`;
+    link.title = ed.title + (ed.edition ? ` ${ed.edition}` : "");
+    edSection.appendChild(link);
+  });
+
+  detail.appendChild(edSection);
+  modalBookList.appendChild(detail);
+}
+
+// ── 모달 뒤로가기 ────────────────────────────────────────
+modalBack.addEventListener("click", () => {
+  _modalState  = "list";
+  _detailGroup = null;
+  modalBack.hidden = true;
+  modalTitle.textContent = `도서 목록 (총 ${_modalAllGroups.reduce((s, g) => s + g.editions.length, 0)}권)`;
+  renderModalListPage();
+});
 
 modalClose.addEventListener("click", closeModal);
 moreModal.addEventListener("click", (e) => { if (e.target === moreModal) closeModal(); });
@@ -455,6 +619,9 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal
 function closeModal() {
   moreModal.hidden = true;
   document.body.style.overflow = "";
+  _modalState  = "list";
+  _detailGroup = null;
+  modalBack.hidden = true;
 }
 
 // ── 대화 초기화 ──────────────────────────────────────────
