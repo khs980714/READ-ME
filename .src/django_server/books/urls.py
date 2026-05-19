@@ -5,6 +5,9 @@ app_name = "books"
 
 urlpatterns = [
     path("", views.book_list, name="list"),
+    path("stats/", views.stats_page, name="stats"),
+    path("stats/api/", views.stats_api, name="stats_api"),
+    path("stats/books/", views.stats_books_api, name="stats_books_api"),
     path("books/<int:pk>/", views.book_detail, name="detail"),
     # 도서 관리 (staff 전용)
     path("manage/", views.book_manage, name="manage"),

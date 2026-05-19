@@ -7,10 +7,12 @@ const VISIBLE_CARDS   = 3;
 const MODAL_PAGE_SIZE = 10;
 
 // 모달 상태
-let _modalAllGroups = [];   // [{rep, editions:[...]}, ...] 전체 그룹 목록
-let _modalPage      = 0;
-let _modalState     = "list"; // "list" | "detail"
-let _detailGroup    = null;   // 현재 상세보기 중인 그룹
+const _modal = {
+  allGroups:   [],    // [{rep, editions:[...]}, ...] 전체 그룹 목록
+  page:        0,
+  state:       "list", // "list" | "detail"
+  detailGroup: null,   // 현재 상세보기 중인 그룹
+};
 
 const chatMessages  = document.getElementById("chatMessages");
 const chatInput     = document.getElementById("chatInput");
@@ -335,7 +337,7 @@ function groupRecommendations(recs) {
 // ── 추천 카드 섹션 렌더링 ────────────────────────────────
 function renderRecommendations(recs, qtype) {
   const groups = groupRecommendations(recs);
-  _modalAllGroups = groups; // 모달에서 재사용
+  _modal.allGroups = groups; // 모달에서 재사용
 
   const section = document.createElement("div");
   section.className = "rec-section";
@@ -349,8 +351,8 @@ function renderRecommendations(recs, qtype) {
   cardsWrap.className = "rec-cards";
 
   const visibleGroups = groups.slice(0, VISIBLE_CARDS);
-  visibleGroups.forEach((g) => {
-    cardsWrap.appendChild(makeGroupCard(g, groups));
+  visibleGroups.forEach((g, i) => {
+    cardsWrap.appendChild(makeGroupCard(g, groups, i + 1));
   });
   section.appendChild(cardsWrap);
 
@@ -366,7 +368,7 @@ function renderRecommendations(recs, qtype) {
 }
 
 // ── 추천 카드 (그룹 대표) ────────────────────────────────
-function makeGroupCard(group, allGroups) {
+function makeGroupCard(group, allGroups, displayRank) {
   const { rep, editions } = group;
   const div = document.createElement("div");
   div.className = "rec-card";
@@ -392,10 +394,11 @@ function makeGroupCard(group, allGroups) {
     </svg>`;
     thumb.appendChild(ph);
   }
-  if (rep.rank) {
+  const rank = displayRank != null ? displayRank : rep.rank;
+  if (rank) {
     const rankBadge = document.createElement("span");
     rankBadge.className = "rec-card-rank";
-    rankBadge.textContent = `#${rep.rank}`;
+    rankBadge.textContent = `#${rank}`;
     thumb.appendChild(rankBadge);
   }
 
@@ -437,10 +440,10 @@ function makeGroupCard(group, allGroups) {
 
 // ── 모달: 목록(더보기) 열기 ──────────────────────────────
 function openListModal(groups) {
-  _modalAllGroups = groups;
-  _modalPage      = 0;
-  _modalState     = "list";
-  _detailGroup    = null;
+  _modal.allGroups = groups;
+  _modal.page      = 0;
+  _modal.state     = "list";
+  _modal.detailGroup    = null;
   modalBack.hidden = true;
   modalTitle.textContent = `도서 목록 (총 ${groups.reduce((s, g) => s + g.editions.length, 0)}권)`;
   renderModalListPage();
@@ -449,17 +452,16 @@ function openListModal(groups) {
 }
 
 function renderModalListPage() {
-  const total      = _modalAllGroups.length;
+  const total      = _modal.allGroups.length;
   const totalPages = Math.ceil(total / MODAL_PAGE_SIZE);
-  const start      = _modalPage * MODAL_PAGE_SIZE;
-  const pageGroups = _modalAllGroups.slice(start, start + MODAL_PAGE_SIZE);
+  const start      = _modal.page * MODAL_PAGE_SIZE;
+  const pageGroups = _modal.allGroups.slice(start, start + MODAL_PAGE_SIZE);
 
   modalBookList.innerHTML = "";
-  pageGroups.forEach((g) => {
-    // makeGroupCard의 click 이벤트를 목록용으로 오버라이드
-    const c = makeGroupCard(g, _modalAllGroups);
+  pageGroups.forEach((g, i) => {
+    const displayRank = start + i + 1;
+    const c = makeGroupCard(g, _modal.allGroups, displayRank);
     c.style.width = "100%";
-    // 기존 click 리스너를 제거하고 목록→상세 전환 리스너 추가
     const clone = c.cloneNode(true);
     clone.addEventListener("click", () => openDetailFromList(g));
     clone.addEventListener("keydown", (e) => {
@@ -475,18 +477,18 @@ function renderModalListPage() {
   const prev = document.createElement("button");
   prev.className = "btn-page";
   prev.textContent = "이전";
-  prev.disabled = _modalPage === 0;
-  prev.addEventListener("click", () => { _modalPage--; renderModalListPage(); });
+  prev.disabled = _modal.page === 0;
+  prev.addEventListener("click", () => { _modal.page--; renderModalListPage(); });
 
   const info = document.createElement("span");
   info.className = "modal-page-info";
-  info.textContent = `${_modalPage + 1} / ${totalPages} 페이지`;
+  info.textContent = `${_modal.page + 1} / ${totalPages} 페이지`;
 
   const next = document.createElement("button");
   next.className = "btn-page";
   next.textContent = "다음";
-  next.disabled = _modalPage >= totalPages - 1;
-  next.addEventListener("click", () => { _modalPage++; renderModalListPage(); });
+  next.disabled = _modal.page >= totalPages - 1;
+  next.addEventListener("click", () => { _modal.page++; renderModalListPage(); });
 
   modalPagination.appendChild(prev);
   modalPagination.appendChild(info);
@@ -495,9 +497,9 @@ function renderModalListPage() {
 
 // ── 모달: 상세보기 열기 ──────────────────────────────────
 function openDetailModal(group, allGroups) {
-  _modalAllGroups = allGroups || _modalAllGroups;
-  _detailGroup    = group;
-  _modalState     = "detail";
+  _modal.allGroups = allGroups || _modal.allGroups;
+  _modal.detailGroup    = group;
+  _modal.state     = "detail";
   modalBack.hidden = false;
   modalTitle.textContent = group.rep.title;
   renderModalDetail(group);
@@ -506,8 +508,8 @@ function openDetailModal(group, allGroups) {
 }
 
 function openDetailFromList(group) {
-  _detailGroup = group;
-  _modalState  = "detail";
+  _modal.detailGroup = group;
+  _modal.state  = "detail";
   modalBack.hidden = false;
   modalTitle.textContent = group.rep.title;
   renderModalDetail(group);
@@ -593,10 +595,10 @@ function renderModalDetail(group) {
 
 // ── 모달 뒤로가기 ────────────────────────────────────────
 modalBack.addEventListener("click", () => {
-  _modalState  = "list";
-  _detailGroup = null;
+  _modal.state  = "list";
+  _modal.detailGroup = null;
   modalBack.hidden = true;
-  modalTitle.textContent = `도서 목록 (총 ${_modalAllGroups.reduce((s, g) => s + g.editions.length, 0)}권)`;
+  modalTitle.textContent = `도서 목록 (총 ${_modal.allGroups.reduce((s, g) => s + g.editions.length, 0)}권)`;
   renderModalListPage();
 });
 
@@ -607,8 +609,8 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal
 function closeModal() {
   moreModal.hidden = true;
   document.body.style.overflow = "";
-  _modalState  = "list";
-  _detailGroup = null;
+  _modal.state  = "list";
+  _modal.detailGroup = null;
   modalBack.hidden = true;
 }
 

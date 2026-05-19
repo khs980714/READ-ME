@@ -26,6 +26,7 @@
 
 import json
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from queue import Empty, Queue
@@ -34,26 +35,39 @@ from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
-# ── job 저장소 (메모리) ───────────────────────────────────────
-_jobs: dict[str, Queue] = {}
-_jobs_lock = threading.Lock()
-_running = threading.Event()          # 파이프라인 동시 실행 방지
+class _JobStore:
+    """단일 파이프라인 작업 유형의 job Queue 저장소 + 동시 실행 제어."""
 
-_embed_jobs: dict[str, Queue] = {}
-_embed_jobs_lock = threading.Lock()
-_embed_running = threading.Event()    # 임베딩 동시 실행 방지
+    def __init__(self):
+        self._jobs: dict[str, Queue] = {}
+        self._lock = threading.Lock()
+        self._running = threading.Event()
 
-_year_jobs: dict[str, Queue] = {}
-_year_jobs_lock = threading.Lock()
-_year_running = threading.Event()     # 연도 추출 동시 실행 방지
+    def is_running(self) -> bool:
+        return self._running.is_set()
 
-_classify_jobs: dict[str, Queue] = {}
-_classify_jobs_lock = threading.Lock()
-_classify_running = threading.Event()
+    def set_running(self):
+        self._running.set()
 
-_category_jobs: dict[str, Queue] = {}
-_category_jobs_lock = threading.Lock()
-_category_running = threading.Event()
+    def clear_running(self):
+        self._running.clear()
+
+    def add(self, job_id: str, q: Queue):
+        with self._lock:
+            self._jobs[job_id] = q
+
+    def get_response(self, job_id: str) -> "StreamingHttpResponse":
+        return _make_sse_response(self._jobs, self._lock, job_id)
+
+
+# ── job 저장소 인스턴스 ────────────────────────────────────────
+_pipeline_store  = _JobStore()
+_embed_store     = _JobStore()
+_year_store      = _JobStore()
+_classify_store  = _JobStore()
+_category_store  = _JobStore()
+_collect_store   = _JobStore()
+_yes24_store     = _JobStore()
 
 # ── 취소 플래그 (job_id → Event) ─────────────────────────────
 _cancel_flags: dict[str, threading.Event] = {}
@@ -185,19 +199,14 @@ def stop_job(request, job_id: str):
 
 # ── 데이터 수집 전용 (분류·임베딩 제외) ──────────────────────────
 
-_collect_jobs: dict[str, Queue] = {}
-_collect_jobs_lock = threading.Lock()
-_collect_running = threading.Event()
-
-
 @_staff_required
 @require_POST
 def run_collect_only(request):
     """description·thumbnail·toc 수집만 실행 (분류·임베딩 없음, SSE)."""
-    if _collect_running.is_set():
+    if _collect_store.is_running():
         if not _parse_force(request):
             return JsonResponse({"error": "이미 데이터 수집이 진행 중입니다."}, status=409)
-        _collect_running.clear()
+        _collect_store.clear_running()
 
     from books.models import BookList
     targets = list(
@@ -212,10 +221,9 @@ def run_collect_only(request):
     job_id = str(uuid.uuid4())
     q: Queue = Queue()
     cancel_event = _register_cancel(job_id)
-    with _collect_jobs_lock:
-        _collect_jobs[job_id] = q
+    _collect_store.add(job_id, q)
 
-    _collect_running.set()
+    _collect_store.set_running()
     threading.Thread(target=_collect_worker, args=(job_id, q, targets, cancel_event), daemon=True).start()
     return JsonResponse({"job_id": job_id})
 
@@ -264,13 +272,13 @@ def _collect_worker(job_id: str, q: Queue, targets: list, cancel_event: threadin
         q.put({"type": "fatal", "error": str(e)})
     finally:
         q.put(None)
-        _collect_running.clear()
+        _collect_store.clear_running()
         _unregister_cancel(job_id)
 
 
 def collect_stream(request, job_id: str):
     """SSE 스트림 — 데이터 수집 진행 상황."""
-    return _make_sse_response(_collect_jobs, _collect_jobs_lock, job_id)
+    return _collect_store.get_response(job_id)
 
 
 # ── 전체 파이프라인 ───────────────────────────────────────────
@@ -288,18 +296,17 @@ def run_pipeline(request):
     """전체 파이프라인 시작. job_id를 반환하고 백그라운드에서 실행.
     BookList(중복 제거된 도서 정보) 단위로 처리합니다.
     """
-    if _running.is_set():
+    if _pipeline_store.is_running():
         if not _parse_force(request):
             return JsonResponse({"error": "이미 파이프라인이 실행 중입니다."}, status=409)
-        _running.clear()
+        _pipeline_store.clear_running()
 
     job_id = str(uuid.uuid4())
     q: Queue = Queue()
     cancel_event = _register_cancel(job_id)
-    with _jobs_lock:
-        _jobs[job_id] = q
+    _pipeline_store.add(job_id, q)
 
-    _running.set()
+    _pipeline_store.set_running()
     threading.Thread(target=_pipeline_worker, args=(job_id, q, cancel_event), daemon=True).start()
     return JsonResponse({"job_id": job_id})
 
@@ -373,7 +380,7 @@ def _pipeline_worker(job_id: str, q: Queue, cancel_event: threading.Event):
         q.put({"type": "fatal", "error": str(e)})
     finally:
         q.put(None)
-        _running.clear()
+        _pipeline_store.clear_running()
         _unregister_cancel(job_id)
         # 파이프라인 완료 후 통계 캐시 무효화
         from django.core.cache import cache
@@ -382,7 +389,7 @@ def _pipeline_worker(job_id: str, q: Queue, cancel_event: threading.Event):
 
 def pipeline_stream(request, job_id: str):
     """SSE 스트림 — 파이프라인 진행 상황."""
-    return _make_sse_response(_jobs, _jobs_lock, job_id)
+    return _pipeline_store.get_response(job_id)
 
 
 # ── 임베딩 누락 도서 처리 ─────────────────────────────────────
@@ -391,10 +398,10 @@ def pipeline_stream(request, job_id: str):
 @require_POST
 def run_embed_missing(request):
     """description 있는 모든 도서의 임베딩을 생성·갱신합니다 (SSE 방식)."""
-    if _embed_running.is_set():
+    if _embed_store.is_running():
         if not _parse_force(request):
             return JsonResponse({"error": "이미 임베딩이 진행 중입니다."}, status=409)
-        _embed_running.clear()
+        _embed_store.clear_running()
 
     from books.models import BookList
     targets = list(
@@ -408,10 +415,9 @@ def run_embed_missing(request):
     job_id = str(uuid.uuid4())
     q: Queue = Queue()
     cancel_event = _register_cancel(job_id)
-    with _embed_jobs_lock:
-        _embed_jobs[job_id] = q
+    _embed_store.add(job_id, q)
 
-    _embed_running.set()
+    _embed_store.set_running()
     threading.Thread(target=_embed_worker, args=(job_id, q, targets, cancel_event), daemon=True).start()
     return JsonResponse({"job_id": job_id})
 
@@ -445,13 +451,13 @@ def _embed_worker(job_id: str, q: Queue, targets: list, cancel_event: threading.
         q.put({"type": "fatal", "error": str(e)})
     finally:
         q.put(None)
-        _embed_running.clear()
+        _embed_store.clear_running()
         _unregister_cancel(job_id)
 
 
 def embed_stream(request, job_id: str):
     """SSE 스트림 — 임베딩 진행 상황."""
-    return _make_sse_response(_embed_jobs, _embed_jobs_lock, job_id)
+    return _embed_store.get_response(job_id)
 
 
 # ── 난이도 분류 ───────────────────────────────────────────────
@@ -460,10 +466,10 @@ def embed_stream(request, job_id: str):
 @require_POST
 def run_classify(request):
     """description 있는 전체 도서를 SSE 방식으로 일괄 분류 (DB 저장 없이 결과 반환)."""
-    if _classify_running.is_set():
+    if _classify_store.is_running():
         if not _parse_force(request):
             return JsonResponse({"error": "이미 난이도 분류가 진행 중입니다."}, status=409)
-        _classify_running.clear()
+        _classify_store.clear_running()
 
     from books.models import BookList
     targets = list(
@@ -477,10 +483,9 @@ def run_classify(request):
     job_id = str(uuid.uuid4())
     q: Queue = Queue()
     cancel_event = _register_cancel(job_id)
-    with _classify_jobs_lock:
-        _classify_jobs[job_id] = q
+    _classify_store.add(job_id, q)
 
-    _classify_running.set()
+    _classify_store.set_running()
     threading.Thread(target=_classify_worker, args=(job_id, q, targets, cancel_event), daemon=True).start()
     return JsonResponse({"job_id": job_id})
 
@@ -523,6 +528,7 @@ def _classify_worker(job_id: str, q: Queue, targets: list, cancel_event: threadi
                 errors += 1
                 q.put({"type": "log", "status": "error",
                        "title": bl.title, "error": str(e)})
+            time.sleep(0.5)
 
         if not cancel_event.is_set():
             q.put({"type": "preview", "done": done, "errors": errors,
@@ -531,13 +537,13 @@ def _classify_worker(job_id: str, q: Queue, targets: list, cancel_event: threadi
         q.put({"type": "fatal", "error": str(e)})
     finally:
         q.put(None)
-        _classify_running.clear()
+        _classify_store.clear_running()
         _unregister_cancel(job_id)
 
 
 def classify_stream(request, job_id: str):
     """SSE 스트림 — 난이도 분류 진행 상황."""
-    return _make_sse_response(_classify_jobs, _classify_jobs_lock, job_id)
+    return _classify_store.get_response(job_id)
 
 
 @_staff_required
@@ -565,10 +571,10 @@ def classify_apply(request):
 @require_POST
 def run_extract_year(request):
     """전체 도서의 출판 연도를 제목·설명에서 추출하여 저장."""
-    if _year_running.is_set():
+    if _year_store.is_running():
         if not _parse_force(request):
             return JsonResponse({"error": "이미 연도 추출이 진행 중입니다."}, status=409)
-        _year_running.clear()
+        _year_store.clear_running()
 
     from books.models import BookList
     targets = list(BookList.objects.all().order_by("title"))
@@ -578,10 +584,9 @@ def run_extract_year(request):
     job_id = str(uuid.uuid4())
     q: Queue = Queue()
     cancel_event = _register_cancel(job_id)
-    with _year_jobs_lock:
-        _year_jobs[job_id] = q
+    _year_store.add(job_id, q)
 
-    _year_running.set()
+    _year_store.set_running()
     threading.Thread(target=_year_worker, args=(job_id, q, targets, cancel_event), daemon=True).start()
     return JsonResponse({"job_id": job_id})
 
@@ -620,13 +625,13 @@ def _year_worker(job_id: str, q: Queue, targets: list, cancel_event: threading.E
         q.put({"type": "fatal", "error": str(e)})
     finally:
         q.put(None)
-        _year_running.clear()
+        _year_store.clear_running()
         _unregister_cancel(job_id)
 
 
 def year_stream(request, job_id: str):
     """SSE 스트림 — 연도 추출 진행 상황."""
-    return _make_sse_response(_year_jobs, _year_jobs_lock, job_id)
+    return _year_store.get_response(job_id)
 
 
 # ── 카테고리 분류 ─────────────────────────────────────────────
@@ -635,10 +640,10 @@ def year_stream(request, job_id: str):
 @require_POST
 def run_classify_category(request):
     """description 있는 전체 도서를 SSE 방식으로 일괄 분류 (DB 저장 없이 결과 반환)."""
-    if _category_running.is_set():
+    if _category_store.is_running():
         if not _parse_force(request):
             return JsonResponse({"error": "이미 카테고리 분류가 진행 중입니다."}, status=409)
-        _category_running.clear()
+        _category_store.clear_running()
 
     from books.models import BookList
     targets = list(
@@ -653,10 +658,9 @@ def run_classify_category(request):
     job_id = str(uuid.uuid4())
     q: Queue = Queue()
     cancel_event = _register_cancel(job_id)
-    with _category_jobs_lock:
-        _category_jobs[job_id] = q
+    _category_store.add(job_id, q)
 
-    _category_running.set()
+    _category_store.set_running()
     threading.Thread(target=_category_worker, args=(job_id, q, targets, cancel_event), daemon=True).start()
     return JsonResponse({"job_id": job_id})
 
@@ -684,6 +688,7 @@ def _category_worker(job_id: str, q: Queue, targets: list, cancel_event: threadi
                     errors += 1
                     q.put({"type": "log", "status": "error",
                            "title": bl.title, "error": "카테고리 반환 없음"})
+                    time.sleep(0.5)
                     continue
 
                 results.append({
@@ -699,6 +704,7 @@ def _category_worker(job_id: str, q: Queue, targets: list, cancel_event: threadi
                 errors += 1
                 q.put({"type": "log", "status": "error",
                        "title": bl.title, "error": str(e)})
+            time.sleep(0.5)
 
         if not cancel_event.is_set():
             q.put({"type": "preview", "done": done, "errors": errors,
@@ -707,13 +713,13 @@ def _category_worker(job_id: str, q: Queue, targets: list, cancel_event: threadi
         q.put({"type": "fatal", "error": str(e)})
     finally:
         q.put(None)
-        _category_running.clear()
+        _category_store.clear_running()
         _unregister_cancel(job_id)
 
 
 def category_stream(request, job_id: str):
     """SSE 스트림 — 카테고리 분류 진행 상황."""
-    return _make_sse_response(_category_jobs, _category_jobs_lock, job_id)
+    return _category_store.get_response(job_id)
 
 
 @_staff_required
@@ -820,11 +826,6 @@ def apply_book_candidate(request):
 
 # ── YES24 후보 수집 파이프라인 ────────────────────────────────
 
-_yes24_jobs: dict[str, Queue] = {}
-_yes24_jobs_lock = threading.Lock()
-_yes24_running = threading.Event()
-
-
 @_staff_required
 @require_POST
 def run_yes24_pipeline(request):
@@ -832,10 +833,10 @@ def run_yes24_pipeline(request):
 
     body.resume (bool, default True): True이면 이미 후보가 있는 도서는 건너뜀.
     """
-    if _yes24_running.is_set():
+    if _yes24_store.is_running():
         if not _parse_force(request):
             return JsonResponse({"error": "이미 YES24 수집이 진행 중입니다."}, status=409)
-        _yes24_running.clear()
+        _yes24_store.clear_running()
 
     body = json.loads(request.body or "{}")
     resume = body.get("resume", True)
@@ -843,10 +844,9 @@ def run_yes24_pipeline(request):
     job_id = str(uuid.uuid4())
     q: Queue = Queue()
     cancel_event = _register_cancel(job_id)
-    with _yes24_jobs_lock:
-        _yes24_jobs[job_id] = q
+    _yes24_store.add(job_id, q)
 
-    _yes24_running.set()
+    _yes24_store.set_running()
     threading.Thread(
         target=_yes24_pipeline_worker,
         args=(job_id, q, cancel_event, resume),
@@ -916,14 +916,14 @@ def _yes24_pipeline_worker(job_id: str, q: Queue, cancel_event: threading.Event,
         q.put({"type": "fatal", "error": str(exc)})
     finally:
         q.put(None)
-        _yes24_running.clear()
+        _yes24_store.clear_running()
         _unregister_cancel(job_id)
         from django.core.cache import cache
         cache.delete(_PIPELINE_STATS_CACHE_KEY)
 
 
 def yes24_pipeline_stream(request, job_id: str):
-    return _make_sse_response(_yes24_jobs, _yes24_jobs_lock, job_id)
+    return _yes24_store.get_response(job_id)
 
 
 # ── YES24 후보 관리 ───────────────────────────────────────────

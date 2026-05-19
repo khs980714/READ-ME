@@ -149,12 +149,16 @@ if _R2_BUCKET:
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ── Cache ──────────────────────────────────────────────────────
-# 메모리 캐시: 카테고리 목록, 파이프라인 통계 등 자주 조회되는 데이터에 사용
-# Redis 도입 시 BACKEND를 django_redis.cache.RedisCache로 교체하세요.
+_REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 CACHES = {
     "default": {
-        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        "LOCATION": "readme-cache",
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": _REDIS_URL,
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "IGNORE_EXCEPTIONS": True,   # Redis 장애 시 캐시 miss로 처리 (서비스 유지)
+        },
+        "KEY_PREFIX": "readme",
     }
 }
 

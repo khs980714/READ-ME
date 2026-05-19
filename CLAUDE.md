@@ -14,8 +14,8 @@
 
 | 컴포넌트 | 경로 | 역할 |
 |---|---|---|
-| Django | `django_server/` | 웹 UI, REST API, 도서 관리, 파이프라인 커맨드 |
-| FastAPI | `fastapi_server/` | LLM 추론, 임베딩, 질문 분류, LangChain 체인 |
+| Django | `.src/django_server/` | 웹 UI, REST API, 도서 관리, 파이프라인 커맨드 |
+| FastAPI | `.src/fastapi_server/` | LLM 추론, 임베딩, 질문 분류, LangChain 체인 |
 | PostgreSQL | Docker `db` | pgvector 포함, 포트 5432 |
 
 ---
@@ -61,7 +61,7 @@ docker exec read-me-backend-1 python manage.py fetch_book_info --all
 ## 코딩 컨벤션
 
 - 도서 비즈니스 로직 → `books/services.py`
-- LangChain 체인 → `fastapi_server/chains/` (라우터에는 체인 호출만)
+- LangChain 체인 → `.src/fastapi_server/chains/` (라우터에는 체인 호출만)
 - DB 마이그레이션은 항상 리뷰 후 적용
 
 ---

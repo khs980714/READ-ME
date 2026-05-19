@@ -8,8 +8,11 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.db.models import Q
 from django.views.decorators.http import require_POST
+from django.contrib.admin.views.decorators import staff_member_required
 
-from .models import Author, Book, BookList, Category, Publisher
+from django.db.models import Count
+
+from .models import Author, Book, BookList, BookListCategory, Category, Publisher
 
 # 카테고리 목록 캐시 TTL (초) — 카테고리는 거의 변하지 않으므로 10분 캐시
 _CATEGORY_CACHE_KEY = "books:all_categories"
@@ -520,3 +523,238 @@ def book_delete(request, pk):
     book.delete()
     messages.success(request, f"도서 [{book_code}] {title} 이(가) 삭제되었습니다.")
     return redirect("books:manage")
+
+
+# ── 통계 페이지 ───────────────────────────────────────────────
+
+# 카테고리별 기술 스택 키워드 정의
+# 형식: { 카테고리명: { 기술명: ([포함 키워드], [제외 키워드]) } }
+_TECH_KEYWORDS: dict[str, dict[str, tuple[list, list]]] = {
+    "프로그래밍 언어": {
+        "Python":     (["파이썬", "python"], []),
+        "Java":       (["자바", "java"], ["자바스크립트", "javascript"]),
+        "JavaScript": (["자바스크립트", "javascript"], []),
+        "C/C++":      (["c언어", "c++", "씨언어", "c 프로그래밍"], []),
+        "Go":         (["golang", "go 언어", "고언어"], []),
+        "TypeScript": (["타입스크립트", "typescript"], []),
+        "Kotlin":     (["코틀린", "kotlin"], []),
+        "PHP":        (["php"], []),
+        "Rust":       (["러스트", "rust 언어", "rust프로그래밍"], []),
+        "Swift":      (["스위프트", "swift 언어"], []),
+        "R":          (["r 언어", "r프로그래밍", "r로 배우"], []),
+    },
+    "웹 개발": {
+        "React":      (["리액트", "react"], []),
+        "Spring":     (["스프링", "spring"], []),
+        "Vue.js":     (["뷰제이에스", "vue.js", "vue 3", "vue로"], ["리뷰"]),
+        "Node.js":    (["노드", "node.js", "nodejs"], []),
+        "TypeScript": (["타입스크립트", "typescript"], []),
+        "Next.js":    (["넥스트", "next.js"], []),
+        "HTML/CSS":   (["html", "css 레이아웃", "웹 퍼블"], []),
+        "Django":     (["장고", "django"], []),
+        "FastAPI":    (["fastapi"], []),
+        "PHP":        (["php"], []),
+    },
+    "모바일 개발": {
+        "Android":       (["안드로이드", "android"], []),
+        "Flutter":       (["플러터", "flutter"], []),
+        "iOS":           (["ios", "아이폰 앱", "아이폰앱"], []),
+        "Kotlin":        (["코틀린", "kotlin"], []),
+        "Swift":         (["스위프트", "swift"], []),
+        "React Native":  (["react native", "리액트 네이티브"], []),
+    },
+    "데이터베이스": {
+        "MySQL":         (["mysql", "마이에스큐엘", "마이sql"], []),
+        "PostgreSQL":    (["postgresql", "postgres"], []),
+        "MongoDB":       (["mongodb", "몽고db", "몽고디비"], []),
+        "Oracle":        (["오라클", "oracle"], []),
+        "Redis":         (["redis", "레디스"], []),
+        "Elasticsearch": (["elasticsearch", "엘라스틱서치", "엘라스틱"], []),
+        "SQL":           (["sql"], []),
+    },
+    "자료구조·알고리즘": {
+        "알고리즘":        (["알고리즘"], []),
+        "자료구조":        (["자료구조"], []),
+        "코딩테스트":      (["코딩테스트", "코딩 테스트"], []),
+        "Python 알고리즘": (["파이썬 알고리즘", "python 알고리즘", "파이썬으로 배우는 알고리즘"], []),
+        "Java 알고리즘":   (["자바 알고리즘", "java 알고리즘"], []),
+        "C++ 알고리즘":    (["c++ 알고리즘"], []),
+    },
+    "컴퓨터 과학": {
+        "운영체제":   (["운영체제"], []),
+        "네트워크":   (["네트워크"], []),
+        "Linux":     (["리눅스", "linux", "유닉스"], []),
+        "컴퓨터구조": (["컴퓨터 구조", "컴퓨터구조"], []),
+        "컴파일러":   (["컴파일러"], []),
+    },
+    "인공지능·데이터": {
+        "머신러닝":    (["머신러닝", "machine learning"], []),
+        "딥러닝":      (["딥러닝", "deep learning"], []),
+        "PyTorch":     (["파이토치", "pytorch"], []),
+        "TensorFlow":  (["텐서플로", "tensorflow"], []),
+        "pandas":      (["판다스", "pandas"], []),
+        "GPT·LLM":     (["gpt", "llm", "chatgpt", "거대 언어", "거대언어"], []),
+        "LangChain":   (["langchain", "랭체인"], []),
+        "데이터 분석": (["데이터 분석", "데이터분석"], []),
+    },
+    "DevOps·클라우드": {
+        "AWS":        (["aws", "아마존 웹 서비스"], []),
+        "Docker":     (["도커", "docker"], []),
+        "Kubernetes": (["쿠버네티스", "kubernetes", "k8s"], []),
+        "Azure":      (["애저", "azure"], []),
+        "GCP":        (["gcp", "구글 클라우드"], []),
+        "Terraform":  (["테라폼", "terraform"], []),
+        "CI/CD":      (["ci/cd", "jenkins", "깃허브 액션", "github action", "github actions"], []),
+    },
+    "소프트웨어 공학": {
+        "클린코드":      (["클린코드", "clean code"], []),
+        "디자인패턴":    (["디자인패턴", "design pattern"], []),
+        "마이크로서비스":(["마이크로서비스", "microservice"], []),
+        "TDD":           (["tdd", "테스트 주도", "테스트주도"], []),
+        "리팩토링":      (["리팩토링", "refactoring"], []),
+        "DDD":           (["ddd", "도메인 주도"], []),
+        "애자일":        (["애자일", "agile"], []),
+    },
+    "보안": {
+        "정보보안":    (["정보보안"], []),
+        "네트워크보안":(["네트워크 보안", "네트워크보안"], []),
+        "웹보안":      (["웹 보안", "웹보안", "owasp"], []),
+        "암호학":      (["암호학", "암호 알고리즘", "cryptography"], []),
+        "해킹":        (["해킹", "hacking", "해커", "버그바운티"], []),
+        "침투테스트":  (["침투 테스트", "침투테스트", "penetration"], []),
+        "포렌식":      (["포렌식", "forensic"], []),
+    },
+    "자격증·취업": {
+        "정보처리기사":  (["정보처리기사"], []),
+        "SQLD":          (["sqld", "sql 개발자"], []),
+        "정보보안기사":  (["정보보안기사"], []),
+        "네트워크관리사":(["네트워크관리사"], []),
+        "AWS 자격증":    (["aws 자격", "aws certified"], []),
+        "리눅스마스터":  (["리눅스마스터", "lpi"], []),
+        "빅데이터":      (["빅데이터 분석기사", "빅데이터 준전문가"], []),
+    },
+    "IT 교양": {
+        "개발자 에세이": (["개발자로", "개발자의", "프로그래머로", "개발자가"], []),
+        "AI·미래기술":   (["ai 시대", "인공지능 시대", "미래 기술"], []),
+        "스타트업":      (["스타트업", "창업"], []),
+        "IT 경영":       (["디지털 전환", "cto", "it 경영"], []),
+        "비전공자":      (["비전공자", "it 입문", "코딩 입문"], []),
+    },
+}
+
+_STATS_CACHE_KEY = "books:stats_data_v2"
+_STATS_CACHE_TTL = 300  # 5분
+
+
+def _build_stack_data() -> dict:
+    """카테고리별 기술 스택 키워드 카운트. PostgreSQL ILIKE 매칭."""
+    result = {}
+    for cat_name, tech_map in _TECH_KEYWORDS.items():
+        entries = []
+        for tech, (includes, excludes) in tech_map.items():
+            include_q = Q()
+            for kw in includes:
+                include_q |= Q(title__icontains=kw)
+            qs = BookList.objects.filter(include_q)
+            for ex in excludes:
+                qs = qs.exclude(title__icontains=ex)
+            cnt = qs.count()
+            if cnt > 0:
+                entries.append({"name": tech, "count": cnt})
+        result[cat_name] = sorted(entries, key=lambda x: -x["count"])
+    return result
+
+
+@staff_member_required
+def stats_page(request):
+    return render(request, "books/stats.html")
+
+
+@staff_member_required
+def stats_books_api(request):
+    """기술 스택 클릭 시 매칭 도서 목록 반환."""
+    cat  = request.GET.get("cat", "")
+    tech = request.GET.get("tech", "")
+    cat_map = _TECH_KEYWORDS.get(cat, {})
+    if tech not in cat_map:
+        return JsonResponse({"books": [], "total": 0, "tech": tech})
+    includes, excludes = cat_map[tech]
+    include_q = Q()
+    for kw in includes:
+        include_q |= Q(title__icontains=kw)
+    qs = BookList.objects.filter(include_q)
+    for ex in excludes:
+        qs = qs.exclude(title__icontains=ex)
+    total = qs.count()
+    books = list(qs.order_by("title").values("id", "title", "difficulty")[:50])
+    return JsonResponse({"books": books, "total": total, "tech": tech})
+
+
+@staff_member_required
+def stats_api(request):
+    """통계 데이터 JSON API — 5분 캐시."""
+    data = cache.get(_STATS_CACHE_KEY)
+    if data is not None:
+        return JsonResponse(data)
+
+    unique_books = BookList.objects.count()
+    assign_total = BookListCategory.objects.count()
+
+    # 카테고리별 도서 수
+    cat_counts = dict(
+        Category.objects.annotate(cnt=Count("book_lists"))
+        .order_by("-cnt")
+        .values_list("name", "cnt")
+    )
+
+    # 난이도 분포
+    diff_counts = {
+        row["difficulty"]: row["cnt"]
+        for row in BookList.objects
+        .filter(difficulty__in=["입문", "초급", "중급", "고급"])
+        .values("difficulty")
+        .annotate(cnt=Count("id"))
+    }
+
+    # 출판사 Top 8
+    pub_top = list(
+        Publisher.objects.annotate(cnt=Count("book_lists"))
+        .order_by("-cnt")[:8]
+        .values_list("name", "cnt")
+    )
+
+    # 카테고리 × 난이도 교차
+    heat_raw = (
+        BookListCategory.objects
+        .filter(book_list__difficulty__in=["입문", "초급", "중급", "고급"])
+        .values("category__name", "book_list__difficulty")
+        .annotate(cnt=Count("id"))
+    )
+    heat_data: dict[str, dict] = {}
+    for row in heat_raw:
+        cname = row["category__name"]
+        diff  = row["book_list__difficulty"]
+        heat_data.setdefault(cname, {"입문": 0, "초급": 0, "중급": 0, "고급": 0})
+        heat_data[cname][diff] = row["cnt"]
+
+    # 기술 스택
+    stack_data = _build_stack_data()
+
+    # 상위 카테고리
+    top_cat = max(cat_counts.items(), key=lambda x: x[1]) if cat_counts else ("—", 0)
+
+    result = {
+        "summary": {
+            "unique_books": unique_books,
+            "assign_total": assign_total,
+            "avg_per_book": round(assign_total / unique_books, 2) if unique_books else 0,
+            "top_cat": {"name": top_cat[0], "count": top_cat[1]},
+        },
+        "cat_counts":  cat_counts,
+        "stack_data":  stack_data,
+        "diff_counts": diff_counts,
+        "pub_top":     pub_top,
+        "heat_data":   heat_data,
+    }
+    cache.set(_STATS_CACHE_KEY, result, _STATS_CACHE_TTL)
+    return JsonResponse(result)

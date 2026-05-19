@@ -6,10 +6,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev gcc \
     && rm -rf /var/lib/apt/lists/*
 
-COPY fastapi_server/requirements.txt .
+COPY .src/fastapi_server/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY fastapi_server/ .
+COPY .src/fastapi_server/ .
 
 EXPOSE 8001
 

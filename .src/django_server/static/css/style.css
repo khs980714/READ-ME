@@ -423,9 +423,9 @@ button { cursor: pointer; font-family: inherit; }
   padding: 2px 8px;
   border-radius: 20px;
   line-height: 1.6;
-  background: #7c3aed;
+  background: #4338ca;
   color: #ffffff;
-  border: 1px solid #7c3aed;
+  border: 1px solid #4338ca;
   letter-spacing: 0.3px;
 }
 
@@ -606,8 +606,17 @@ button { cursor: pointer; font-family: inherit; }
 
 /* ── Responsive ──────────────────────────────────────────── */
 @media (max-width: 768px) {
+  /* 네비게이션 바: 좁은 화면에서 가로 스크롤로 처리 */
+  .navbar { overflow-x: auto; }
+  .navbar-inner {
+    padding: 0 12px;
+    min-width: max-content;
+    gap: 4px;
+  }
+  .nav-links a { padding: 0 10px; font-size: 0.82rem; }
+  .admin-badge { display: none; }
+  .topbar { padding: 0 12px; }
   .main-content { padding: 20px 16px 48px; }
-  .navbar-inner { padding: 0 16px; }
   .detail-wrap { flex-direction: column; padding: 20px; }
   .detail-thumb { width: 140px; margin: 0 auto; }
   .book-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }

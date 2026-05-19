@@ -12,8 +12,8 @@ env/
 
 # ── Django ────────────────────────────────────────────────────
 db.sqlite3
-django_server/staticfiles/
-django_server/media/
+.src/django_server/staticfiles/
+.src/django_server/media/
 
 # ── Environment ───────────────────────────────────────────────
 .env
@@ -31,12 +31,12 @@ Thumbs.db
 # data
 data.csv
 example_data.csv
-
+workspace/
 test/
 
 # ── Locust 부하 테스트 결과 ────────────────────────────────────
-fastapi_server/tests/load_report.html
-fastapi_server/tests/load_stats_*.csv
+.src/fastapi_server/tests/load_report.html
+.src/fastapi_server/tests/load_stats_*.csv
 
 # 로컬 전용 메모
 todo.md

@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}통계 — READ:ME{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/stats.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="stats-container">
+
+  <!-- 페이지 헤더 -->
+  <div class="stats-header">
+    <h1 class="stats-title">도서 통계</h1>
+    <p class="stats-desc">카테고리·난이도·출판사별 보유 현황</p>
+  </div>
+
+  <!-- 요약 카드 -->
+  <div class="summary-grid">
+    <div class="summary-card">
+      <div class="sc-label">고유 도서 수</div>
+      <div class="sc-value" id="s-unique">—</div>
+      <div class="sc-sub">중복 제거 기준 BookList</div>
+    </div>
+    <div class="summary-card">
+      <div class="sc-label">카테고리 배정 합계</div>
+      <div class="sc-value" id="s-assign">—</div>
+      <div class="sc-sub">1권이 복수 카테고리 포함 가능</div>
+    </div>
+    <div class="summary-card">
+      <div class="sc-label">가장 많은 카테고리</div>
+      <div class="sc-value" id="s-top-cnt">—</div>
+      <div class="sc-sub" id="s-top-name">—</div>
+    </div>
+    <div class="summary-card">
+      <div class="sc-label">평균 카테고리 / 도서</div>
+      <div class="sc-value" id="s-avg">—</div>
+      <div class="sc-sub">배정 합계 ÷ 고유 도서 수</div>
+    </div>
+  </div>
+
+  <!-- 탭 네비게이션 -->
+  <div class="tab-nav">
+    <button class="tab-btn active" data-tab="stack">카테고리 별 기술 스택</button>
+    <button class="tab-btn" data-tab="diff">난이도</button>
+    <button class="tab-btn" data-tab="pub">출판사</button>
+    <button class="tab-btn" data-tab="heat">카테고리 × 난이도 교차 분포</button>
+  </div>
+
+  <!-- ① 탭: 카테고리 별 기술 스택 -->
+  <div class="tab-panel active" id="tab-stack">
+    <div class="stack-layout">
+
+      <!-- 메인 차트 카드 -->
+      <div class="card">
+        <div class="stack-card-title">기술 스택 별 도서 수</div>
+
+        <!-- 카테고리 탭 -->
+        <div class="cat-tabs" id="catTabs"></div>
+
+        <!-- 차트 타입 선택 -->
+        <div class="type-row" id="typeRow">
+          <button class="type-btn active" data-type="hbar">수평 바</button>
+          <button class="type-btn" data-type="vbar">수직 바</button>
+          <button class="type-btn" data-type="donut">도넛</button>
+          <button class="type-btn" data-type="word">워드클라우드</button>
+        </div>
+
+        <div class="chart-sub-text" id="chartSub">—</div>
+
+        <div class="chart-wrap">
+          <canvas id="mainCanvas"></canvas>
+          <canvas id="wordCanvas" style="display:none"></canvas>
+        </div>
+      </div>
+
+      <!-- 사이드 도넛: 카테고리 분포 -->
+      <div class="card side-card">
+        <div class="card-title">카테고리 분포</div>
+        <div class="card-sub">카테고리별 배정 도서 수</div>
+        <div class="donut-wrap"><canvas id="donutSide"></canvas></div>
+        <div class="legend-list" id="donutLegend"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ② 탭: 난이도 -->
+  <div class="tab-panel" id="tab-diff">
+    <div class="card">
+      <div class="card-title">난이도 분포</div>
+      <div class="card-sub">전체 도서의 입문·초급·중급·고급 비율</div>
+      <div class="diff-chart-wrap"><canvas id="diffChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ③ 탭: 출판사 -->
+  <div class="tab-panel" id="tab-pub">
+    <div class="card">
+      <div class="card-title">출판사별 도서 수 Top 8</div>
+      <div class="card-sub">보유 도서가 많은 출판사 순</div>
+      <div class="pub-chart-wrap"><canvas id="pubChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ④ 탭: 히트맵 -->
+  <div class="tab-panel" id="tab-heat">
+    <div class="card">
+      <div class="card-title">카테고리별 난이도 히트맵</div>
+      <div class="card-sub">셀 값 = 배정 도서 수 / 색상 강도 = 비율</div>
+      <div class="heatmap-wrap" id="heatmapWrap"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- 도서 목록 팝오버 -->
+<div id="statsBooksPopover" class="stats-popover" style="display:none" role="dialog" aria-modal="true">
+  <div class="stats-popover-inner">
+    <div class="stats-popover-header">
+      <div>
+        <span class="stats-popover-title" id="popoverTitle"></span>
+        <span class="stats-popover-count" id="popoverCount"></span>
+      </div>
+      <button class="stats-popover-close" id="popoverClose" aria-label="닫기">✕</button>
+    </div>
+    <div class="stats-popover-body" id="popoverBody"></div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  const STATS_API_URL       = "{% url 'books:stats_api' %}";
+  const STATS_BOOKS_API_URL = "{% url 'books:stats_books_api' %}";
+  const BOOK_DETAIL_BASE    = "{% url 'books:detail' pk=0 %}".replace("/0/", "/");
+</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/wordcloud@1.2.2/src/wordcloud2.js"></script>
+<script src="{% static 'js/stats.js' %}"></script>
+{% endblock %}

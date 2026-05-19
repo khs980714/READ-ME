@@ -1,0 +1,307 @@
+/* ── 통계 페이지 ─────────────────────────────────────────── */
+
+.stats-container {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 36px 20px 80px;
+}
+
+.stats-header { margin-bottom: 32px; }
+.stats-title  { font-size: 1.55rem; font-weight: 800; margin-bottom: 5px; }
+.stats-desc   { font-size: .88rem; color: var(--text-sub); }
+
+/* ── 요약 카드 ───────────────────────────────────────────── */
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 28px;
+}
+@media (max-width: 768px) { .summary-grid { grid-template-columns: repeat(2, 1fr); } }
+
+.summary-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  box-shadow: var(--shadow-sm);
+}
+.sc-label {
+  font-size: .72rem; font-weight: 700; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px;
+}
+.sc-value { font-size: 1.85rem; font-weight: 800; color: var(--primary); line-height: 1; }
+.sc-sub   { font-size: .75rem; color: var(--text-sub); margin-top: 4px; }
+
+/* ── 탭 네비게이션 ───────────────────────────────────────── */
+.tab-nav {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 24px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tab-nav::-webkit-scrollbar { display: none; }
+
+.tab-btn {
+  padding: 10px 20px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: .88rem; font-weight: 600; font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color .14s, border-color .14s;
+}
+.tab-btn:hover  { color: var(--primary); }
+.tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+/* ── 탭 패널 ─────────────────────────────────────────────── */
+.tab-panel         { display: none; }
+.tab-panel.active  { display: block; }
+
+/* ── 공통 카드 ───────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px 26px;
+  box-shadow: var(--shadow-sm);
+}
+.card-title { font-size: .96rem; font-weight: 700; margin-bottom: 3px; }
+.card-sub   { font-size: .8rem;  color: var(--text-muted); margin-bottom: 16px; }
+
+/* ── 기술 스택 레이아웃 ──────────────────────────────────── */
+.stack-layout {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 16px;
+}
+@media (max-width: 900px) { .stack-layout { grid-template-columns: 1fr; } }
+
+.stack-card-title {
+  font-size: 1.1rem;
+  font-weight: 800;
+  margin-bottom: 14px;
+}
+
+/* 카테고리 탭 */
+.cat-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+
+.cat-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--text-sub);
+  font-size: .78rem; font-weight: 600; font-family: inherit;
+  cursor: pointer; transition: all .14s;
+}
+.cat-btn:hover  { border-color: var(--primary); color: var(--primary); }
+.cat-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+/* 차트 메타 영역 */
+.chart-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.chart-cat-label {
+  font-size: .78rem; font-weight: 700;
+  background: var(--primary-light); color: var(--primary);
+  padding: 3px 10px; border-radius: 12px;
+}
+
+/* 차트 타입 선택 */
+.type-row { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 10px; }
+
+.type-btn {
+  padding: 4px 10px;
+  border: 1.5px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text-sub);
+  font-size: .76rem; font-weight: 600; font-family: inherit;
+  cursor: pointer; transition: all .13s;
+}
+.type-btn:hover  { border-color: var(--primary); color: var(--primary); }
+.type-btn.active { background: var(--primary-light); border-color: var(--primary); color: var(--primary); }
+
+.chart-sub-text { font-size: .79rem; color: var(--text-muted); margin-bottom: 12px; }
+
+/* 캔버스 */
+.chart-wrap { position: relative; }
+#mainCanvas { display: block; width: 100% !important; }
+#wordCanvas { display: none; width: 100% !important; height: 260px; border-radius: 6px; background: #fafafa; }
+
+/* ── 사이드 카드 ─────────────────────────────────────────── */
+.side-card { display: flex; flex-direction: column; }
+.donut-wrap { position: relative; height: 200px; }
+
+.legend-list { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
+.legend-item { display: flex; align-items: center; gap: 8px; font-size: .78rem; }
+.legend-dot  { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.legend-name { flex: 1; color: var(--text-sub); }
+.legend-count { font-weight: 700; }
+.legend-pct  { color: var(--text-muted); font-size: .72rem; }
+
+/* ── 난이도 탭 차트 ──────────────────────────────────────── */
+.diff-chart-wrap {
+  position: relative;
+  max-width: 480px;
+  margin: 0 auto;
+  height: 360px;
+}
+
+/* ── 출판사 탭 차트 ──────────────────────────────────────── */
+.pub-chart-wrap { position: relative; height: 360px; }
+
+/* ── 히트맵 ──────────────────────────────────────────────── */
+.heatmap-wrap { overflow-x: auto; margin-top: 14px; }
+
+.heatmap {
+  border-collapse: collapse;
+  font-size: .74rem;
+  width: 100%;
+  min-width: 520px;
+}
+.heatmap th,
+.heatmap td {
+  border: 1px solid var(--border);
+  padding: 5px 9px;
+  text-align: center;
+  white-space: nowrap;
+}
+.heatmap th {
+  background: #fafafa;
+  font-weight: 700;
+  color: var(--text-sub);
+  position: sticky;
+  top: 0;
+}
+.heatmap td.row-label {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-sub);
+  background: #fafafa;
+}
+.heatmap td.row-sum {
+  font-weight: 800;
+  color: var(--primary);
+}
+
+/* ── 도서 목록 팝오버 ────────────────────────────────────── */
+.stats-popover {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0,0,0,.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.stats-popover-inner {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  width: 100%;
+  max-width: 480px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.stats-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.stats-popover-title {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.stats-popover-count {
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-light);
+  padding: 2px 10px;
+  border-radius: 12px;
+  margin-left: 8px;
+}
+
+.stats-popover-close {
+  background: none;
+  border: none;
+  font-size: 1rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: background .13s;
+}
+.stats-popover-close:hover { background: var(--border); color: var(--text); }
+
+.stats-popover-body {
+  overflow-y: auto;
+  padding: 12px 20px;
+  flex: 1;
+}
+
+.popover-book-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border);
+  font-size: .85rem;
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+  transition: background .13s;
+  margin: 0 -6px;
+}
+.popover-book-item:last-child { border-bottom: none; }
+.popover-book-item:hover { background: var(--primary-light); }
+.popover-book-item:hover .popover-book-title { color: var(--primary); }
+
+.popover-book-title {
+  flex: 1;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.popover-book-diff {
+  font-size: .72rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+.popover-book-diff.diff-입문 { background: #d1fae5; color: #065f46; }
+.popover-book-diff.diff-초급 { background: #dbeafe; color: #1e40af; }
+.popover-book-diff.diff-중급 { background: #fef3c7; color: #92400e; }
+.popover-book-diff.diff-고급 { background: #fee2e2; color: #991b1b; }
+
+.popover-empty {
+  font-size: .85rem;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 24px 0;
+}

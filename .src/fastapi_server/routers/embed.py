@@ -1,11 +1,25 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 from llm import get_embeddings, get_llm
 from db import upsert_embedding
 from langchain_core.messages import HumanMessage
 
 router = APIRouter()
+
+
+def _is_rate_limit(exc: BaseException) -> bool:
+    msg = str(exc)
+    return "429" in msg or "Too Many Requests" in msg or "RateLimitError" in type(exc).__name__
+
+
+_retry_on_rate_limit = retry(
+    retry=retry_if_exception(_is_rate_limit),
+    wait=wait_exponential(multiplier=2, min=4, max=60),
+    stop=stop_after_attempt(5),
+    reraise=True,
+)
 
 
 class EmbedBookRequest(BaseModel):
@@ -52,6 +66,18 @@ async def embed_book(req: EmbedBookRequest):
     return EmbedBookResponse(book_list_id=req.book_list_id, status="ok")
 
 
+async def _call_llm(prompt: str) -> str:
+    """Rate-limit 재시도 포함 LLM 단일 호출. 응답 텍스트를 반환."""
+    llm = get_llm()
+
+    @_retry_on_rate_limit
+    async def _invoke():
+        return await llm.ainvoke([HumanMessage(content=prompt)])
+
+    response = await _invoke()
+    return response.content.strip()
+
+
 @router.post("/classify", response_model=ClassifyResponse)
 async def classify_difficulty(req: ClassifyRequest):
     """리뷰 + 도서 정보를 LLM으로 분석하여 난이도 반환."""
@@ -61,9 +87,7 @@ async def classify_difficulty(req: ClassifyRequest):
         description=req.description[:500],
         reviews=reviews_text,
     )
-    llm = get_llm()
-    response = await llm.ainvoke([HumanMessage(content=prompt)])
-    difficulty = response.content.strip()
+    difficulty = await _call_llm(prompt)
 
     valid = ("입문", "초급", "중급", "고급")
     for v in valid:
@@ -120,15 +144,13 @@ async def classify_category(req: ClassifyCategoryRequest):
         title=req.title,
         description=req.description[:500],
     )
-    llm = get_llm()
-    response = await llm.ainvoke([HumanMessage(content=prompt)])
-    raw = response.content.strip()
+    raw = await _call_llm(prompt)
 
-    result = []
-    for token in raw.replace("、", ",").split(","):
-        name = token.strip()
-        if name in VALID_CATEGORIES:
-            result.append(name)
+    result = [
+        name.strip()
+        for token in raw.replace("、", ",").split(",")
+        if (name := token.strip()) in VALID_CATEGORIES
+    ]
 
     # LLM이 유효 카테고리를 하나도 못 반환하면 IT 교양으로 fallback
     return ClassifyCategoryResponse(categories=result if result else ["IT 교양"])
