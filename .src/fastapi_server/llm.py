@@ -15,7 +15,7 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 # ── 토큰 한도 설정 ────────────────────────────────────────────
-# llama-3.2-nv-embedqa-1b-v2 의 최대 시퀀스 길이는 8,192 토큰.
+# llama-nemotron-embed-1b-v2 의 최대 시퀀스 길이는 8,192 토큰.
 # 한국어 음절 1자 ≈ 1 토큰 기준으로 안전 한도를 8,000자로 설정.
 _MAX_EMBED_CHARS = 8_000
 
