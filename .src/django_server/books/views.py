@@ -3,7 +3,7 @@ import threading
 
 from django.contrib import messages
 from django.core.cache import cache
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.db.models import Q
@@ -121,8 +121,11 @@ def book_add(request):
     duplicate_books = []
 
     if request.method == "POST":
+        from .services import parse_book_codes
+
         form_data = request.POST
-        book_code = request.POST.get("book_code", "").strip()
+        book_code_raw = request.POST.get("book_code", "").strip()
+        book_codes = parse_book_codes(book_code_raw)
         title = request.POST.get("title", "").strip()
         subtitle = request.POST.get("subtitle", "").strip()
         edition = request.POST.get("edition", "").strip()
@@ -138,65 +141,75 @@ def book_add(request):
         is_active = request.POST.get("is_active") == "on"
         confirm_link = request.POST.get("confirm_link") == "true"
 
-        if not all([book_code, title, author_name, publisher_name]):
+        if not book_codes or not all([title, author_name, publisher_name]):
             error = "도서 코드, 도서명, 저자, 출판사는 필수 항목입니다."
         else:
-            try:
-                author, _ = Author.objects.get_or_create(name=author_name)
-                publisher, _ = Publisher.objects.get_or_create(name=publisher_name)
-
-                # 동일한 (title, edition, author, publisher) BookList 존재 여부 확인
+            existing_codes = list(
+                Book.objects.filter(book_code__in=book_codes).values_list("book_code", flat=True)
+            )
+            if existing_codes:
+                error = f"이미 존재하는 도서 코드입니다: {', '.join(existing_codes)}"
+            else:
                 try:
-                    existing_bl = BookList.objects.get(
-                        title=title, edition=edition, author=author, publisher=publisher
-                    )
-                    # 중복 BookList 발견
-                    if not confirm_link:
-                        duplicate_book_list = existing_bl
-                        duplicate_books = list(existing_bl.books.all())
-                    else:
-                        # 사용자가 확인: 기존 BookList에 새 Book 연결
-                        Book.objects.create(
-                            book_code=book_code,
-                            book_list=existing_bl,
-                            is_active=is_active,
-                        )
-                        messages.success(
-                            request,
-                            f"도서 [{book_code}] {title} 이(가) 기존 도서로 연결되어 추가되었습니다.",
-                        )
-                        return redirect("books:manage")
-                except BookList.DoesNotExist:
-                    # 중복 없음 — 신규 BookList 생성
-                    book_list = BookList.objects.create(
-                        title=title,
-                        subtitle=subtitle,
-                        edition=edition,
-                        author=author,
-                        publisher=publisher,
-                        difficulty=difficulty,
-                        publication_year=publication_year,
-                        thumbnail_url=thumbnail_url,
-                        description=description,
-                        toc=toc,
-                    )
-                    book_list.categories.set(Category.objects.filter(id__in=category_ids))
-                    Book.objects.create(
-                        book_code=book_code,
-                        book_list=book_list,
-                        is_active=is_active,
-                    )
-                    if thumbnail_url and not book_list.thumbnail:
-                        from .services import _save_thumbnail
-                        if _save_thumbnail(book_list, thumbnail_url):
-                            book_list.save(update_fields=["thumbnail"])
-                    messages.success(request, f"도서 [{book_code}] {title} 이(가) 추가되었습니다.")
-                    return redirect("books:manage")
+                    author, _ = Author.objects.get_or_create(name=author_name)
+                    publisher, _ = Publisher.objects.get_or_create(name=publisher_name)
 
-            except IntegrityError:
-                error = f"도서 코드 '{book_code}'는 이미 존재합니다."
-            except Exception as e:
-                error = str(e)
+                    # 동일한 (title, edition, author, publisher) BookList 존재 여부 확인
+                    try:
+                        existing_bl = BookList.objects.get(
+                            title=title, edition=edition, author=author, publisher=publisher
+                        )
+                        # 중복 BookList 발견
+                        if not confirm_link:
+                            duplicate_book_list = existing_bl
+                            duplicate_books = list(existing_bl.books.all())
+                        else:
+                            # 사용자가 확인: 기존 BookList에 새 Book(들) 연결
+                            with transaction.atomic():
+                                for code in book_codes:
+                                    Book.objects.create(
+                                        book_code=code,
+                                        book_list=existing_bl,
+                                        is_active=is_active,
+                                    )
+                            messages.success(
+                                request,
+                                f"도서 [{', '.join(book_codes)}] {title} 이(가) 기존 도서로 연결되어 추가되었습니다.",
+                            )
+                            return redirect("books:manage")
+                    except BookList.DoesNotExist:
+                        # 중복 없음 — 신규 BookList 생성 후 코드별 Book 연결
+                        with transaction.atomic():
+                            book_list = BookList.objects.create(
+                                title=title,
+                                subtitle=subtitle,
+                                edition=edition,
+                                author=author,
+                                publisher=publisher,
+                                difficulty=difficulty,
+                                publication_year=publication_year,
+                                thumbnail_url=thumbnail_url,
+                                description=description,
+                                toc=toc,
+                            )
+                            book_list.categories.set(Category.objects.filter(id__in=category_ids))
+                            for code in book_codes:
+                                Book.objects.create(
+                                    book_code=code,
+                                    book_list=book_list,
+                                    is_active=is_active,
+                                )
+                        if thumbnail_url and not book_list.thumbnail:
+                            from .services import _save_thumbnail
+                            if _save_thumbnail(book_list, thumbnail_url):
+                                book_list.save(update_fields=["thumbnail"])
+                        messages.success(request, f"도서 [{', '.join(book_codes)}] {title} 이(가) 추가되었습니다.")
+                        return redirect("books:manage")
+
+                except IntegrityError:
+                    error = f"도서 코드 처리 중 중복 오류가 발생했습니다: {', '.join(book_codes)}"
+                except Exception as e:
+                    error = str(e)
 
     return render(request, "books/manage_form.html", {
         "mode": "add",

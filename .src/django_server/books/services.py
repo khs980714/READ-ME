@@ -328,15 +328,27 @@ def fetch_yes24_book_info(title: str) -> dict | None:
 
 # ── 교보문고 스크래핑 ─────────────────────────────────────────
 
+# product.kyobobook.co.kr은 CloudFront 뒤에 있어 Referer/Accept 헤더가 없으면
+# User-Agent가 정상이어도 빈 응답(200, Content-Length 0)을 반환한다.
+_KYOBO_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "Referer": "https://www.kyobobook.co.kr/",
+}
+
+
 def fetch_kyobo_book_info(title: str) -> dict | None:
     """교보문고 검색 결과에서 도서 설명 + 목차 스크래핑."""
     try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         search_url = (
             "https://search.kyobobook.co.kr/search"
             f"?keyword={urllib.parse.quote(_normalize_title(title))}&target=BOOK"
         )
-        resp = requests.get(search_url, headers=headers, timeout=10)
+        resp = requests.get(search_url, headers=_KYOBO_HEADERS, timeout=10)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
 
@@ -348,32 +360,87 @@ def fetch_kyobo_book_info(title: str) -> dict | None:
             product_url = "https://product.kyobobook.co.kr" + product_url
 
         time.sleep(0.5)
-        resp2 = requests.get(product_url, headers=headers, timeout=10)
-        soup2 = BeautifulSoup(resp2.text, "html.parser")
+        return fetch_kyobo_book_detail(product_url)
+    except Exception as exc:
+        logger.warning("교보문고 수집 실패 (%s): %s", title, exc)
+        return None
+
+
+def fetch_kyobo_book_detail(href: str) -> dict | None:
+    """교보문고 상세 페이지 링크(product.kyobobook.co.kr/detail/...)에서 도서 정보 수집.
+
+    수집 항목: 썸네일, 도서명, 부제, 저자, 출판사, 출판 연도, 설명, 목차.
+    목차는 도서에 따라 교보문고에 데이터가 없을 수 있어 없으면 생략한다.
+    """
+    try:
+        resp = requests.get(href, headers=_KYOBO_HEADERS, timeout=15)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
 
         result: dict = {}
 
+        # 도서명
+        title_tag = soup.select_one(".prod_title")
+        if title_tag:
+            result["title"] = title_tag.get_text(strip=True)
+
+        # 부제(간단 소개 문구)
+        subtitle_tag = soup.select_one("#bookSimpleIntro")
+        if subtitle_tag:
+            subtitle_text = subtitle_tag.get_text(strip=True)
+            if subtitle_text:
+                result["subtitle"] = subtitle_text
+
+        # 저자/역자 — 여러 명인 경우 쉼표로 연결
+        author_info = soup.select_one("#author-info")
+        if author_info:
+            authors = [a.get_text(strip=True) for a in author_info.select("a")]
+            if authors:
+                result["author"] = ", ".join(authors)
+
+        # 출판사 + 출판 연도
+        publisher_info = soup.select_one("#publisher-info")
+        if publisher_info:
+            pub_link = publisher_info.select_one("a")
+            if pub_link:
+                result["publisher"] = pub_link.get_text(strip=True)
+            year_match = re.search(r"(\d{4})년", publisher_info.get_text())
+            if year_match:
+                result["publication_year"] = int(year_match.group(1))
+
+        # 썸네일
+        thumb_tag = soup.select_one('img[alt$="대표 이미지"]')
+        if thumb_tag and thumb_tag.get("src"):
+            result["thumbnail_url"] = thumb_tag["src"]
+
         # 도서 소개
-        intro_tag = soup2.select_one(".intro_bottom")
+        intro_tag = soup.select_one("#bookDescription")
         if not intro_tag:
-            intro_tag = soup2.select_one("[data-tab-cont='introduce']")
+            intro_tag = soup.select_one(".intro_bottom") or soup.select_one("[data-tab-cont='introduce']")
         if intro_tag:
             text = intro_tag.get_text(separator="\n", strip=True)
             if text:
                 result["description"] = text[:2000]
 
-        # 목차
-        toc_tag = soup2.select_one("[data-tab-cont='contents']")
-        if not toc_tag:
-            toc_tag = soup2.select_one(".book_contents_inner")
-        if toc_tag:
-            text = toc_tag.get_text(separator="\n", strip=True)
-            if text:
-                result["toc"] = text[:3000]
+        # 목차 — 상세 페이지 HTML에는 스켈레톤만 내려오고(클라이언트에서 뷰포트에
+        # 들어올 때 렌더링), 실제 텍스트는 내부 컴포넌트 API에서 별도로 받아온다.
+        item_id = href.rstrip("/").rsplit("/", 1)[-1].split("?")[0]
+        if item_id:
+            try:
+                comp_resp = requests.get(
+                    f"https://product.kyobobook.co.kr/api/gw/pdt/v2/product/component/{item_id}/middle",
+                    headers=_KYOBO_HEADERS, timeout=10,
+                )
+                comp_resp.raise_for_status()
+                toc_text = comp_resp.json().get("data", {}).get("middle", {}).get("contentTableList")
+                if toc_text:
+                    result["toc"] = toc_text.strip()
+            except Exception as exc:
+                logger.warning("교보문고 목차 API 수집 실패 (%s): %s", item_id, exc)
 
         return result if result else None
     except Exception as exc:
-        logger.warning("교보문고 수집 실패 (%s): %s", title, exc)
+        logger.warning("교보문고 상세 수집 실패 (%s): %s", href, exc)
         return None
 
 
@@ -588,6 +655,12 @@ def scrape_from_url(url: str) -> dict:
             return {"status": "ok", "data": data}
         return {"status": "error", "message": "YES24 페이지에서 데이터를 가져오지 못했습니다."}
 
+    if "kyobobook.co.kr" in host:
+        data = fetch_kyobo_book_detail(url)
+        if data:
+            return {"status": "ok", "data": data}
+        return {"status": "error", "message": "교보문고 페이지에서 데이터를 가져오지 못했습니다."}
+
     if "aladin.co.kr" in host or "aladdin.co.kr" in host:
         return {"status": "not_implemented", "source": "aladin"}
 
@@ -657,6 +730,27 @@ _fetch_book_info_with_fallback = fetch_book_info_with_fallback
 
 
 # ── 유틸 ─────────────────────────────────────────────────────
+
+def normalize_book_code(code: str) -> str:
+    """도서 코드 정규화. 숫자만 입력되면 'D-nnn' 형식으로 변환합니다.
+
+    이미 접두사(D-, 하이픈 등)가 포함되어 있으면 그대로 반환합니다.
+    """
+    code = code.strip()
+    if code.isdigit():
+        return f"D-{code}"
+    return code
+
+
+def parse_book_codes(raw: str) -> list[str]:
+    """쉼표로 구분된 도서 코드 문자열을 정규화된 코드 목록으로 변환합니다.
+
+    각 항목의 앞뒤 공백을 제거하고 normalize_book_code를 적용하며,
+    중복 코드는 입력 순서를 유지한 채 제거합니다.
+    """
+    codes = [normalize_book_code(c) for c in raw.split(",") if c.strip()]
+    return list(dict.fromkeys(codes))
+
 
 def _strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text).strip()
