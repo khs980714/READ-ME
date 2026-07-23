@@ -10,6 +10,14 @@ DEBUG = os.getenv("DJANGO_DEBUG", "True") == "True"
 _raw_hosts = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1")
 ALLOWED_HOSTS = [h.strip() for h in _raw_hosts.split(",") if h.strip()]
 
+# Cloudflare Tunnel 등 리버스 프록시 뒤에서 실행 시 필요
+# (프록시가 TLS를 종단하고 내부로는 HTTP로 전달하므로, 이 설정이 없으면
+#  Django가 요청을 비보안(HTTP)으로 인식해 HTTPS Origin 기반 CSRF 검사가 실패한다)
+_raw_csrf_origins = os.getenv("CSRF_TRUSTED_ORIGINS", "")
+CSRF_TRUSTED_ORIGINS = [o.strip() for o in _raw_csrf_origins.split(",") if o.strip()]
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
+
 # Docker 내부 IP 자동 허용 (헬스체크 등)
 import socket
 try:
