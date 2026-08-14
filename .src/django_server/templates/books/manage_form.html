@@ -47,6 +47,7 @@
     border: 1.5px solid var(--border);
     border-radius: 8px;
     font-size: 0.9rem;
+    line-height: 1.4;
     font-family: inherit;
     background: var(--bg);
     color: var(--text);
@@ -54,6 +55,7 @@
     transition: border-color .2s, background .2s;
     width: 100%;
   }
+  .form-input, .form-select { height: 40px; }
   .form-input:focus, .form-select:focus, .form-textarea:focus {
     border-color: var(--primary);
     background: #fff;
@@ -189,20 +191,6 @@
 
   .form-actions { display: flex; gap: 10px; padding-top: 8px; }
 
-  /* ── 링크 수집 행 ── */
-  .scrape-row {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    padding: 14px 16px;
-    background: var(--bg);
-    border: 1.5px solid var(--border);
-    border-radius: 8px;
-    margin-bottom: 18px;
-  }
-  .scrape-row .form-input { flex: 1; min-width: 0; }
-  .scrape-status { font-size: 0.84rem; flex-shrink: 0; }
-
   @media (max-width: 640px) {
     .form-card { padding: 20px 16px; }
     .form-grid { grid-template-columns: 1fr; }
@@ -214,7 +202,6 @@
     .form-actions { flex-direction: column; }
     .form-actions .btn-primary,
     .form-actions .btn-ghost { width: 100%; justify-content: center; text-align: center; }
-    .scrape-row { flex-wrap: wrap; }
   }
 
   @media (max-width: 400px) {
@@ -288,11 +275,16 @@
     {% csrf_token %}
     <input type="hidden" name="confirm_link" id="confirmLinkInput" value="">
 
-    <!-- URL 수집 행 -->
-    <div class="scrape-row">
-      <input class="form-input" type="url" id="scrapeUrl" placeholder="YES24 또는 교보문고 링크를 붙여넣으세요.">
-      <button type="button" class="btn-primary" id="scrapeBtn" style="flex-shrink:0;">수집</button>
-      <span class="scrape-status" id="scrapeStatus"></span>
+    <!-- 링크 입력 -->
+    <div class="form-group form-col-full" style="margin-bottom: 18px;">
+      <label class="form-label" for="scrapeUrl">링크 입력</label>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input class="form-input" type="url" id="scrapeUrl"
+               placeholder="YES24 또는 교보문고 링크를 붙여넣으세요." style="flex:1;">
+        <button type="button" class="btn-primary" id="scrapeBtn"
+                style="flex-shrink:0; white-space:nowrap;">수집</button>
+        <span id="scrapeStatus" style="font-size:0.82rem; flex-shrink:0;"></span>
+      </div>
     </div>
 
     <!-- 기본 정보 -->
@@ -388,7 +380,6 @@
             {% if mode == "edit" %}
             <button type="button" id="btnThumbApply" class="btn-primary"
                     style="flex-shrink:0; white-space:nowrap;">적용</button>
-            <span id="thumbApplyStatus" style="font-size:0.82rem; flex-shrink:0;"></span>
             {% endif %}
           </div>
         </div>
@@ -545,17 +536,14 @@
   // ── 썸네일 URL 즉시 적용 (수정 모드) ────────────────────────
   {% if mode == "edit" %}
   (function () {
-    const btn    = document.getElementById("btnThumbApply");
-    const status = document.getElementById("thumbApplyStatus");
+    const btn = document.getElementById("btnThumbApply");
     if (!btn) return;
 
     btn.addEventListener("click", async () => {
       const url = document.getElementById("thumbnail_url").value.trim();
-      if (!url) { status.style.color = "#dc2626"; status.textContent = "URL을 입력하세요."; return; }
+      if (!url) { alert("URL을 입력하세요."); return; }
 
       btn.disabled = true;
-      status.style.color = "var(--text-muted)";
-      status.textContent = "다운로드 중…";
 
       try {
         const res = await fetch("{% url 'books:apply_thumbnail' book.pk %}", {
@@ -568,15 +556,12 @@
         });
         const data = await res.json();
         if (data.ok) {
-          status.style.color = "#16a34a";
-          status.textContent = "✓ 적용 완료";
+          alert("✓ 적용 완료");
         } else {
-          status.style.color = "#dc2626";
-          status.textContent = "오류: " + (data.error || "알 수 없는 오류");
+          alert("오류: " + (data.error || "알 수 없는 오류"));
         }
       } catch (e) {
-        status.style.color = "#dc2626";
-        status.textContent = "연결 실패";
+        alert("연결 실패");
       } finally {
         btn.disabled = false;
       }

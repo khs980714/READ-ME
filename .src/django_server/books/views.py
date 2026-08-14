@@ -121,7 +121,7 @@ def book_add(request):
     duplicate_books = []
 
     if request.method == "POST":
-        from .services import parse_book_codes
+        from .services import classify_category, classify_difficulty, parse_book_codes
 
         form_data = request.POST
         book_code_raw = request.POST.get("book_code", "").strip()
@@ -178,6 +178,19 @@ def book_add(request):
                             )
                             return redirect("books:manage")
                     except BookList.DoesNotExist:
+                        # 미선택 항목은 도서 소개가 있을 때 서버(LLM)가 자동 분류
+                        if not difficulty and description:
+                            classified_difficulty = classify_difficulty(title, description, [])
+                            if classified_difficulty in dict(difficulties):
+                                difficulty = classified_difficulty
+                        if not category_ids and description:
+                            classified_names = classify_category(title, description)
+                            if classified_names:
+                                category_ids = list(
+                                    Category.objects.filter(name__in=classified_names)
+                                    .values_list("id", flat=True)
+                                )
+
                         # 중복 없음 — 신규 BookList 생성 후 코드별 Book 연결
                         with transaction.atomic():
                             book_list = BookList.objects.create(
@@ -313,6 +326,20 @@ def book_edit(request, pk):
 
                 if not duplicate_found:
                     # 중복 없음 — 정상 저장
+                    # 미선택 항목은 도서 소개가 있을 때 서버(LLM)가 자동 분류
+                    from .services import classify_category, classify_difficulty
+                    if not difficulty and description:
+                        classified_difficulty = classify_difficulty(title, description, [])
+                        if classified_difficulty in dict(difficulties):
+                            difficulty = classified_difficulty
+                    if not category_ids and description:
+                        classified_names = classify_category(title, description)
+                        if classified_names:
+                            category_ids = list(
+                                Category.objects.filter(name__in=classified_names)
+                                .values_list("id", flat=True)
+                            )
+
                     # 썸네일: model.save() 전에 처리해 파일 경로를 한 번의 save()로 함께 저장
                     if thumbnail_url and thumbnail_url != prev_thumbnail_url:
                         if book_list.thumbnail:
