@@ -9,7 +9,6 @@ urlpatterns = [
     path("login/", RedirectView.as_view(pattern_name="accounts:login", permanent=False)),
     path("accounts/", include("accounts.urls")),
     path("", include("books.urls")),
-    path("chat/", include("chat.urls")),
     path("pipeline/", include("data_pipeline.urls")),
 ]
 
