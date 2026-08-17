@@ -208,6 +208,50 @@
     .form-grid--3 { grid-template-columns: 1fr; }
     .form-section { padding-bottom: 16px; margin-bottom: 20px; }
   }
+
+  /* ── 토스트 알림 ── */
+  .toast {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%) translateY(10px);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 200px;
+    max-width: min(420px, 90vw);
+    padding: 12px 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow-md);
+    font-size: 0.87rem;
+    font-weight: 600;
+    color: var(--text);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .18s ease, transform .18s ease;
+    z-index: 3000;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--primary);
+  }
+  .toast--success::before { background: #16a34a; }
+  .toast--error::before { background: #dc2626; }
+  .toast--loading::before {
+    background: var(--primary);
+    animation: toast-pulse 1s ease-in-out infinite;
+  }
+  @keyframes toast-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .3; }
+  }
 </style>
 {% endblock %}
 
@@ -279,11 +323,11 @@
     <div class="form-group form-col-full" style="margin-bottom: 18px;">
       <label class="form-label" for="scrapeUrl">링크 입력</label>
       <div style="display:flex; gap:8px; align-items:center;">
-        <input class="form-input" type="url" id="scrapeUrl"
-               placeholder="YES24 또는 교보문고 링크를 붙여넣으세요." style="flex:1;">
+        <input class="form-input" type="url" id="scrapeUrl" name="source_url"
+               placeholder="교보문고 링크를 붙여넣으세요." style="flex:1;"
+               value="{{ form_data.source_url|default:'' }}">
         <button type="button" class="btn-primary" id="scrapeBtn"
                 style="flex-shrink:0; white-space:nowrap;">수집</button>
-        <span id="scrapeStatus" style="font-size:0.82rem; flex-shrink:0;"></span>
       </div>
     </div>
 
@@ -439,6 +483,8 @@
     </div>
   </form>
 </div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
 {% endblock %}
 
 {% block extra_js %}
@@ -458,17 +504,24 @@
     });
   });
 
+  // ── 토스트 알림 ───────────────────────────────────────────
+  const toastEl = document.getElementById("toast");
+  let toastTimer = null;
+
+  function showToast(message, type, duration = 2400) {
+    clearTimeout(toastTimer);
+    toastEl.textContent = message;
+    toastEl.className = "toast show" + (type ? ` toast--${type}` : "");
+    if (type !== "loading") {
+      toastTimer = setTimeout(() => toastEl.classList.remove("show"), duration);
+    }
+  }
+
   // ── URL 수집 ─────────────────────────────────────────────
   (function () {
     const btn    = document.getElementById("scrapeBtn");
     const urlIn  = document.getElementById("scrapeUrl");
-    const status = document.getElementById("scrapeStatus");
     const SCRAPE_URL = "{% url 'books:scrape_url' %}";
-
-    function setStatus(msg, color) {
-      status.textContent = msg;
-      status.style.color = color || "var(--text-sub)";
-    }
 
     function fillField(id, value) {
       if (value === undefined || value === null) return;
@@ -487,10 +540,10 @@
 
     btn.addEventListener("click", async () => {
       const url = urlIn.value.trim();
-      if (!url) { setStatus("URL을 입력해주세요.", "var(--red)"); return; }
+      if (!url) { showToast("URL을 입력해주세요.", "error"); return; }
 
       btn.disabled = true;
-      setStatus("수집 중…", "var(--text-muted)");
+      showToast("수집 중…", "loading");
 
       try {
         const res = await fetch(SCRAPE_URL, {
@@ -515,18 +568,14 @@
           fillField("description",      d.description);
           fillField("toc",              d.toc);
           fillDifficulty(d.difficulty);
-          setStatus("자동 입력 완료", "var(--green)");
-        } else if (json.status === "not_implemented") {
-          alert("알라딘 수집은 아직 미구현입니다.");
-          setStatus("");
+          showToast("자동 입력 완료", "success");
         } else if (json.status === "unsupported") {
-          alert("현재 YES24, 교보문고 링크만 이용 가능합니다.");
-          setStatus("");
+          showToast("현재 교보문고 링크만 이용 가능합니다.", "error");
         } else {
-          setStatus("오류: " + (json.message || "알 수 없는 오류"), "var(--red)");
+          showToast("오류: " + (json.message || "알 수 없는 오류"), "error");
         }
       } catch (e) {
-        setStatus("네트워크 오류: " + e.message, "var(--red)");
+        showToast("네트워크 오류: " + e.message, "error");
       } finally {
         btn.disabled = false;
       }

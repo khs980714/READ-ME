@@ -36,7 +36,7 @@ erDiagram
         int      author_id          FK   "대표 저자"
         int      publisher_id       FK
         text     description             "도서 소개 (max 2,000자)"
-        text     toc                     "목차 (max 3,000자)"
+        text     toc                     "목차 (max 8,000자)"
         enum     difficulty              "입문|초급|중급|고급"
         text     thumbnail_url           "표지 이미지 원본 URL"
         varchar  thumbnail               "로컬 저장 썸네일 파일 경로"
@@ -66,12 +66,12 @@ erDiagram
         timestamptz updated_at
     }
 
-    yes24_candidates {
+    kyobo_candidates {
         int     id              PK
         int     book_list_id    FK     "연결된 도서 정보"
-        varchar title                  "YES24 검색 결과 도서명"
-        varchar subtitle               "부제"
-        url     href                   "YES24 상세 페이지 URL"
+        varchar title                  "교보문고 검색 결과 도서명"
+        varchar subtitle               "부제/저자"
+        url     href                   "교보문고 상세 페이지 URL"
         varchar edition_info           "개정판 정보"
         timestamptz created_at
     }
@@ -110,7 +110,7 @@ erDiagram
     categories      ||--o{ book_list_categories : "분류"
     book_list       ||--o{ books               : "코드 등록"
     book_list       ||--|| book_embeddings      : "임베딩"
-    book_list       ||--o{ yes24_candidates    : "후보"
+    book_list       ||--o{ kyobo_candidates    : "후보"
     chat_sessions   ||--o{ chat_messages        : "포함"
     chat_messages   ||--o{ chat_recommendations : "추천"
     books           ||--o{ chat_recommendations : "추천됨"
@@ -126,7 +126,7 @@ authors     (1) ──── (N) book_list   [ 대표 저자 단일 FK ]
 categories  (M) ──── (N) book_list   [ book_list_categories 경유 ]
 book_list   (1) ──── (N) books        [ 동일 책의 다수 코드 지원, 중복 수집 방지 ]
 book_list   (1) ──── (1) book_embeddings
-book_list   (1) ──── (N) yes24_candidates  [ YES24 검색 후보 임시 저장 ]
+book_list   (1) ──── (N) kyobo_candidates  [ 교보문고 검색 후보 임시 저장 ]
 chat_sessions  (1) ── (N) chat_messages
 chat_messages  (1) ── (N) chat_recommendations
 books        (1) ──── (N) chat_recommendations
@@ -148,10 +148,8 @@ books        (1) ──── (N) chat_recommendations
         ▼
    run_pipeline (BookList 단위)
         │
-        ├──① 멀티소스 정보 수집
-        │     알라딘 API (TTB)   ──► description, toc, thumbnail_url
-        │     YES24 스크래핑    ──► 누락 필드 보완
-        │     교보문고 스크래핑  ──► 누락 필드 보완
+        ├──① 정보 수집 (교보문고 스크래핑)
+        │     검색 → 후보 선택 → 상세 페이지 ──► description, toc, thumbnail_url
         │
         ├──② LLM 난이도 분류 (NVIDIA NIM)
         │     title + description ──► difficulty (입문/초급/중급/고급)
@@ -163,7 +161,7 @@ books        (1) ──── (N) chat_recommendations
 [별도 파이프라인]
    출판 연도 추출:    title / description ──► publication_year
    카테고리 분류:    title + description ──► LLM ──► book_list_categories (1~3개)
-   YES24 후보 수집:  검색 결과 ──► yes24_candidates ──► 수동 선택 후 book_list 갱신
+   교보문고 후보 수집:  검색 결과 ──► kyobo_candidates ──► 수동 선택 후 book_list 갱신
 
 [사용자 챗봇 질문]
         │

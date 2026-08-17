@@ -29,8 +29,7 @@ docker exec read-me-backend-1 python manage.py migrate
 # 도서 초기 적재 (data.csv → DB, 최초 1회)
 docker exec read-me-backend-1 python manage.py load_books
 
-# 개별 도서 데이터 수집 (알라딘 → YES24 → 교보문고 → LLM → 임베딩)
-docker exec read-me-backend-1 python manage.py fetch_book_info --all
+# 도서 데이터 수집 (교보문고 → LLM → 임베딩) — 관리자 웹 UI(/pipeline/) 또는 run_pipeline 커맨드로 실행
 ```
 
 ---
@@ -40,7 +39,6 @@ docker exec read-me-backend-1 python manage.py fetch_book_info --all
 | 변수 | 설명 |
 |---|---|
 | `DATABASE_URL` | `postgresql://readme:readme1234@db:5432/readme_db` |
-| `ALADIN_TTB_KEY` | 알라딘 Open API — 도서 정보 수집 1차 소스 |
 | `NVIDIA_NIM_BASE_URL` / `NVIDIA_LLM_MODEL` | LLM 엔드포인트 (난이도 분류) |
 | `NVIDIA_EMBEDDING_MODEL` / `NVIDIA_API_KEY` | 임베딩 생성 |
 | `LANGCHAIN_API_KEY` / `LANGCHAIN_PROJECT` | LangSmith 트레이싱 |
@@ -54,7 +52,7 @@ docker exec read-me-backend-1 python manage.py fetch_book_info --all
 - **임베딩은 BookList 단위**: `book_embeddings`는 `book_list_id` FK. 동일 책 중복 임베딩 방지.
 - **질문 분류 유형**: `keyword_search` / `specific_search` / `goal_oriented` / `career_certification` / `level_based` / `out_of_scope`
 - **추천 카드**: 최대 3권 노출, 초과분은 "더보기" 모달. 모바일도 동일.
-- **데이터 수집 파이프라인**: 알라딘 API(1차) → YES24 스크래핑(2차) → 교보문고 스크래핑(3차) → LLM 난이도 분류 → 임베딩 생성. Naver API 미사용.
+- **데이터 수집 파이프라인**: 교보문고 스크래핑 → LLM 난이도 분류 → 임베딩 생성. Naver API 미사용.
 
 ---
 

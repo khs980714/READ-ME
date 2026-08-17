@@ -134,7 +134,7 @@ data: {"type": "done", "question_type": "specific_search", "recommendations": [.
 | `progress` | `done`, `total`, `current` | 진행 상황 |
 | `step` | `title`, `step` | 현재 도서 단계 |
 | `log` | `status`, `title`, `messages` | 처리 결과 로그 |
-| `candidates` | `title`, `book_list_id`, `candidates` | 알라딘 후보 도서 목록 |
+| `candidates` | `title`, `book_list_id`, `candidates` | 교보문고 후보 도서 목록 |
 | `cancelled` | `done`, `total` | 작업 취소 |
 | `complete` | `done`, `errors`, `total` | 완료 |
 | `fatal` | `error` | 치명적 오류 |
@@ -223,7 +223,7 @@ data: {"type": "done", "question_type": "specific_search", "recommendations": [.
 ---
 
 #### POST `/pipeline/candidates/search/`
-알라딘 도서 후보 검색 (staff 전용, AJAX).
+교보문고 도서 후보 검색 (staff 전용, AJAX).
 
 **Request**
 ```json
@@ -236,10 +236,9 @@ data: {"type": "done", "question_type": "specific_search", "recommendations": [.
   "candidates": [
     {
       "title": "점프 투 파이썬",
-      "author": "박응용",
-      "publisher": "이지스퍼블리싱",
-      "thumbnail_url": "https://...",
-      "item_id": "12345678"
+      "href": "https://product.kyobobook.co.kr/detail/...",
+      "subtitle": "박응용",
+      "edition_info": "4판"
     }
   ]
 }
@@ -248,11 +247,11 @@ data: {"type": "done", "question_type": "specific_search", "recommendations": [.
 ---
 
 #### POST `/pipeline/candidates/apply/`
-선택한 알라딘 후보 도서 정보 적용 (staff 전용, AJAX).
+선택한 교보문고 후보 도서 정보 적용 (staff 전용, AJAX).
 
 **Request**
 ```json
-{ "book_list_id": 42, "item_id": "12345678" }
+{ "book_list_id": 42, "href": "https://product.kyobobook.co.kr/detail/..." }
 ```
 
 **Response** `200 OK`
@@ -262,14 +261,14 @@ data: {"type": "done", "question_type": "specific_search", "recommendations": [.
 
 ---
 
-#### POST `/pipeline/yes24/run/`
-YES24 후보 수집 파이프라인 시작.
+#### POST `/pipeline/kyobo/run/`
+교보문고 후보 수집 파이프라인 시작.
 
-#### GET `/pipeline/yes24/stream/<job_id>/`
-YES24 후보 수집 진행 상황 SSE.
+#### GET `/pipeline/kyobo/stream/<job_id>/`
+교보문고 후보 수집 진행 상황 SSE.
 
-#### GET `/pipeline/yes24/candidates/`
-저장된 YES24 후보 목록 반환 (AJAX).
+#### GET `/pipeline/kyobo/candidates/`
+저장된 교보문고 후보 목록 반환 (AJAX).
 
 **Response** `200 OK`
 ```json
@@ -280,19 +279,19 @@ YES24 후보 수집 진행 상황 SSE.
       "book_title": "점프 투 파이썬",
       "book_codes": ["D-012"],
       "candidates": [
-        { "title": "점프 투 파이썬", "subtitle": "", "href": "https://...", "edition_info": "" }
+        { "title": "점프 투 파이썬", "subtitle": "박응용", "href": "https://...", "edition_info": "" }
       ]
     }
   ]
 }
 ```
 
-#### POST `/pipeline/yes24/apply/`
-YES24 후보 상세 수집 후 DB 덮어쓰기 (AJAX).
+#### POST `/pipeline/kyobo/apply/`
+교보문고 후보 상세 수집 후 DB 덮어쓰기 (AJAX).
 
 **Request**
 ```json
-{ "book_list_id": 42, "href": "https://www.yes24.com/..." }
+{ "book_list_id": 42, "href": "https://product.kyobobook.co.kr/detail/..." }
 ```
 
 **Response** `200 OK`
@@ -300,8 +299,8 @@ YES24 후보 상세 수집 후 DB 덮어쓰기 (AJAX).
 { "ok": true, "updated_fields": ["description", "toc", "thumbnail_url"] }
 ```
 
-#### POST `/pipeline/yes24/dismiss/`
-YES24 후보 건너뜀 (AJAX).
+#### POST `/pipeline/kyobo/dismiss/`
+교보문고 후보 건너뜀 (AJAX).
 
 **Request**
 ```json
@@ -313,8 +312,8 @@ YES24 후보 건너뜀 (AJAX).
 { "ok": true }
 ```
 
-#### POST `/pipeline/yes24/reset/`
-수집된 YES24 후보 전체 초기화 (AJAX).
+#### POST `/pipeline/kyobo/reset/`
+수집된 교보문고 후보 전체 초기화 (AJAX).
 
 ---
 

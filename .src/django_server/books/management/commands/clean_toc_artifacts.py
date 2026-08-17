@@ -1,6 +1,6 @@
 """Management command: clean_toc_artifacts
 
-YES24 스크래핑 시 목차에 남아있는 UI 잔재(「접어보기」 등)를 DB에서 정리합니다.
+스크래핑 시 목차에 남아있는 UI 잔재(「접어보기」 등)를 DB에서 정리합니다.
 """
 from django.core.management.base import BaseCommand
 

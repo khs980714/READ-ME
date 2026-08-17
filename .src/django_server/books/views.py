@@ -137,6 +137,7 @@ def book_add(request):
         thumbnail_url = request.POST.get("thumbnail_url", "").strip()
         description = request.POST.get("description", "").strip()
         toc = request.POST.get("toc", "").strip()
+        source_url = request.POST.get("source_url", "").strip()
         category_ids = request.POST.getlist("categories")
         is_active = request.POST.get("is_active") == "on"
         confirm_link = request.POST.get("confirm_link") == "true"
@@ -204,6 +205,7 @@ def book_add(request):
                                 thumbnail_url=thumbnail_url,
                                 description=description,
                                 toc=toc,
+                                source_url=source_url,
                             )
                             book_list.categories.set(Category.objects.filter(id__in=category_ids))
                             for code in book_codes:
@@ -262,6 +264,7 @@ def book_edit(request, pk):
         "thumbnail_url": book_list.thumbnail_url,
         "description": book_list.description,
         "toc": book_list.toc,
+        "source_url": book_list.source_url,
     }
 
     if request.method == "POST":
@@ -277,6 +280,7 @@ def book_edit(request, pk):
         thumbnail_url = request.POST.get("thumbnail_url", "").strip()
         description = request.POST.get("description", "").strip()
         toc = request.POST.get("toc", "").strip()
+        source_url = request.POST.get("source_url", "").strip()
         category_ids = request.POST.getlist("categories")
         is_active = request.POST.get("is_active") == "on"
         confirm_link = request.POST.get("confirm_link") == "true"
@@ -356,6 +360,7 @@ def book_edit(request, pk):
                     book_list.thumbnail_url = thumbnail_url
                     book_list.description = description
                     book_list.toc = toc
+                    book_list.source_url = source_url
                     book_list.save()  # thumbnail 파일 경로 포함 전체 저장
                     book_list.categories.set(Category.objects.filter(id__in=category_ids))
                     book.is_active = is_active
@@ -506,7 +511,6 @@ def book_scrape_url(request):
     Request JSON: {"url": "https://..."}
     Response JSON:
         {"status": "ok", "data": {...}}
-        {"status": "not_implemented", "source": "aladin"}
         {"status": "unsupported"}
         {"status": "error", "message": "..."}
     """

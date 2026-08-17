@@ -195,6 +195,5 @@ JWT_IDLE_TIMEOUT_MINUTES = int(os.getenv("JWT_IDLE_TIMEOUT_MINUTES", "30"))
 # ── External services ─────────────────────────────────────────
 NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID", "")
 NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET", "")
-ALADIN_TTB_KEY = os.getenv("ALADIN_TTB_KEY", "")
 MODEL_SERVER_URL = os.getenv("MODEL_SERVER_URL", "http://localhost:8001")
 

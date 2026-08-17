@@ -13,15 +13,15 @@
 - POST /pipeline/category/run/                 → 카테고리 분류 시작 (job_id 반환)
 - GET  /pipeline/category/stream/<job_id>/     → 카테고리 분류 SSE 스트림
 - POST /pipeline/category/apply/               → 카테고리 분류 결과 DB 반영
-- POST /pipeline/candidates/search/            → 알라딘 도서 후보 검색 (AJAX)
+- POST /pipeline/candidates/search/            → 교보문고 도서 후보 검색 (AJAX)
 - POST /pipeline/candidates/apply/             → 선택 후보 도서 정보 적용 (AJAX)
 - GET  /pipeline/thumbnails/scan/              → 미사용 썸네일 파일 목록 반환 (AJAX)
 - POST /pipeline/thumbnails/clean/             → 미사용 썸네일 파일 일괄 삭제 (AJAX)
-- POST /pipeline/yes24/run/                    → YES24 후보 수집 시작 (job_id 반환)
-- GET  /pipeline/yes24/stream/<job_id>/        → YES24 후보 수집 SSE 스트림
-- GET  /pipeline/yes24/candidates/             → 저장된 YES24 후보 목록 반환 (AJAX)
-- POST /pipeline/yes24/apply/                  → 선택 후보 상세 수집 후 DB 덮어쓰기 (AJAX)
-- POST /pipeline/yes24/dismiss/                → 해당 book_list 후보 제거 (AJAX)
+- POST /pipeline/kyobo/run/                    → 교보문고 후보 수집 시작 (job_id 반환)
+- GET  /pipeline/kyobo/stream/<job_id>/        → 교보문고 후보 수집 SSE 스트림
+- GET  /pipeline/kyobo/candidates/             → 저장된 교보문고 후보 목록 반환 (AJAX)
+- POST /pipeline/kyobo/apply/                  → 선택 후보 상세 수집 후 DB 덮어쓰기 (AJAX)
+- POST /pipeline/kyobo/dismiss/                → 해당 book_list 후보 제거 (AJAX)
 """
 
 import json
@@ -67,7 +67,7 @@ _year_store      = _JobStore()
 _classify_store  = _JobStore()
 _category_store  = _JobStore()
 _collect_store   = _JobStore()
-_yes24_store     = _JobStore()
+_kyobo_store     = _JobStore()
 
 # ── 취소 플래그 (job_id → Event) ─────────────────────────────
 _cancel_flags: dict[str, threading.Event] = {}
@@ -113,7 +113,7 @@ def _get_pipeline_stats() -> dict:
         return stats
 
     embedded_ids = BookEmbedding.objects.values_list("book_list_id", flat=True)
-    from books.models import YES24Candidate
+    from books.models import KyoboCandidate
     stats = {
         "total_books_all":    Book.objects.count(),
         "total_books_active": Book.objects.filter(is_active=True).count(),
@@ -134,7 +134,7 @@ def _get_pipeline_stats() -> dict:
             .filter(cat_count=0)
             .count()
         ),
-        "yes24_pending": YES24Candidate.objects.values("book_list").distinct().count(),
+        "kyobo_pending": KyoboCandidate.objects.values("book_list").distinct().count(),
         "thumb_with_url":    BookList.objects.exclude(thumbnail_url="").count(),
         "thumb_without_url": BookList.objects.filter(thumbnail_url="").count(),
         "thumb_with_file":   BookList.objects.exclude(thumbnail="").count(),
@@ -230,7 +230,7 @@ def run_collect_only(request):
 
 def _collect_worker(job_id: str, q: Queue, targets: list, cancel_event: threading.Event):
     try:
-        from books.services import fetch_book_info_with_fallback, _save_thumbnail
+        from books.services import fetch_book_info, _save_thumbnail
 
         total = len(targets)
         q.put({"type": "start", "total": total})
@@ -243,7 +243,7 @@ def _collect_worker(job_id: str, q: Queue, targets: list, cancel_event: threadin
 
             q.put({"type": "progress", "done": done, "total": total, "current": bl.title})
             try:
-                info = fetch_book_info_with_fallback(bl.title, bl.author.name)
+                info = fetch_book_info(bl.title, bl.author.name)
                 update_fields = []
                 if info.get("thumbnail_url") and not bl.thumbnail_url:
                     bl.thumbnail_url = info["thumbnail_url"]
@@ -350,7 +350,7 @@ def _pipeline_worker(job_id: str, q: Queue, cancel_event: threading.Event):
                     done += 1
                 q.put({"type": "log", "status": "success",
                        "title": title, "messages": log_messages})
-                # 알라딘 후보가 2개 이상이면 도서 선택 이벤트 emit
+                # 후보가 2개 이상이면 도서 선택 이벤트 emit
                 if candidates and len(candidates) > 1:
                     q.put({
                         "type": "candidates",
@@ -747,12 +747,12 @@ def category_apply(request):
     return JsonResponse({"ok": True, "applied": applied})
 
 
-# ── 알라딘 도서 후보 선택 ─────────────────────────────────────
+# ── 도서 후보 선택 (교보문고) ──────────────────────────────────
 
 @_staff_required
 @require_POST
 def search_book_candidates(request):
-    """특정 book_list의 알라딘 후보 도서 목록 반환 (AJAX)."""
+    """특정 book_list의 교보문고 후보 도서 목록 반환 (AJAX)."""
     import json as _json
     try:
         body = _json.loads(request.body or "{}")
@@ -764,10 +764,10 @@ def search_book_candidates(request):
         return JsonResponse({"error": "book_list_id 필요"}, status=400)
 
     from books.models import BookList
-    from books.services import fetch_aladin_book_info
+    from books.services import fetch_kyobo_candidates
     try:
         bl = BookList.objects.get(pk=book_list_id)
-        _, candidates = fetch_aladin_book_info(bl.title, max_results=5)
+        candidates = fetch_kyobo_candidates(bl.title, max_results=5)
         return JsonResponse({"candidates": candidates})
     except BookList.DoesNotExist:
         return JsonResponse({"error": "도서 없음"}, status=404)
@@ -778,7 +778,7 @@ def search_book_candidates(request):
 @_staff_required
 @require_POST
 def apply_book_candidate(request):
-    """선택한 알라딘 후보 도서 정보를 BookList에 저장 (AJAX)."""
+    """선택한 교보문고 후보 도서 정보를 BookList에 저장 (AJAX)."""
     import json as _json
     try:
         body = _json.loads(request.body or "{}")
@@ -786,17 +786,17 @@ def apply_book_candidate(request):
         body = {}
 
     book_list_id = body.get("book_list_id")
-    item_id = body.get("item_id")
-    if not book_list_id or not item_id:
-        return JsonResponse({"error": "book_list_id, item_id 필요"}, status=400)
+    href = body.get("href")
+    if not book_list_id or not href:
+        return JsonResponse({"error": "book_list_id, href 필요"}, status=400)
 
     from books.models import BookList
-    from books.services import fetch_aladin_by_item_id
+    from books.services import fetch_kyobo_book_detail
     try:
         bl = BookList.objects.get(pk=book_list_id)
-        info = fetch_aladin_by_item_id(str(item_id))
+        info = fetch_kyobo_book_detail(href)
         if not info:
-            return JsonResponse({"error": "알라딘에서 도서 정보를 가져올 수 없습니다."}, status=404)
+            return JsonResponse({"error": "교보문고에서 도서 정보를 가져올 수 없습니다."}, status=404)
 
         from books.services import _save_thumbnail
         update_fields = []
@@ -809,6 +809,8 @@ def apply_book_candidate(request):
         if info.get("toc"):
             bl.toc = info["toc"]
             update_fields.append("toc")
+        bl.source_url = href
+        update_fields.append("source_url")
 
         if bl.thumbnail_url and (info.get("thumbnail_url") or not bl.thumbnail):
             if _save_thumbnail(bl, bl.thumbnail_url):
@@ -824,19 +826,19 @@ def apply_book_candidate(request):
         return JsonResponse({"error": str(exc)}, status=500)
 
 
-# ── YES24 후보 수집 파이프라인 ────────────────────────────────
+# ── 교보문고 후보 수집 파이프라인 ─────────────────────────────
 
 @_staff_required
 @require_POST
-def run_yes24_pipeline(request):
-    """YES24 검색 1차 수집 — 도서별 후보 목록을 DB에 저장하고 job_id 반환.
+def run_kyobo_pipeline(request):
+    """교보문고 검색 1차 수집 — 도서별 후보 목록을 DB에 저장하고 job_id 반환.
 
     body.resume (bool, default True): True이면 이미 후보가 있는 도서는 건너뜀.
     """
-    if _yes24_store.is_running():
+    if _kyobo_store.is_running():
         if not _parse_force(request):
-            return JsonResponse({"error": "이미 YES24 수집이 진행 중입니다."}, status=409)
-        _yes24_store.clear_running()
+            return JsonResponse({"error": "이미 교보문고 수집이 진행 중입니다."}, status=409)
+        _kyobo_store.clear_running()
 
     body = json.loads(request.body or "{}")
     resume = body.get("resume", True)
@@ -844,28 +846,28 @@ def run_yes24_pipeline(request):
     job_id = str(uuid.uuid4())
     q: Queue = Queue()
     cancel_event = _register_cancel(job_id)
-    _yes24_store.add(job_id, q)
+    _kyobo_store.add(job_id, q)
 
-    _yes24_store.set_running()
+    _kyobo_store.set_running()
     threading.Thread(
-        target=_yes24_pipeline_worker,
+        target=_kyobo_pipeline_worker,
         args=(job_id, q, cancel_event, resume),
         daemon=True,
     ).start()
     return JsonResponse({"job_id": job_id})
 
 
-def _yes24_pipeline_worker(job_id: str, q: Queue, cancel_event: threading.Event, resume: bool = True):
+def _kyobo_pipeline_worker(job_id: str, q: Queue, cancel_event: threading.Event, resume: bool = True):
     try:
-        from books.models import BookList, YES24Candidate
-        from books.services import fetch_yes24_candidates
+        from books.models import BookList, KyoboCandidate
+        from books.services import fetch_kyobo_candidates
 
         all_book_lists = list(BookList.objects.select_related("author").order_by("title"))
 
         if resume:
             # 이미 후보가 수집된 도서는 건너뜀
             processed_ids = set(
-                YES24Candidate.objects.values_list("book_list_id", flat=True).distinct()
+                KyoboCandidate.objects.values_list("book_list_id", flat=True).distinct()
             )
             book_lists = [bl for bl in all_book_lists if bl.id not in processed_ids]
             skipped = len(all_book_lists) - len(book_lists)
@@ -884,11 +886,11 @@ def _yes24_pipeline_worker(job_id: str, q: Queue, cancel_event: threading.Event,
 
             q.put({"type": "progress", "done": done, "total": total, "current": bl.full_title})
             try:
-                candidates = fetch_yes24_candidates(bl.full_title)
+                candidates = fetch_kyobo_candidates(bl.full_title)
                 # 기존 후보 초기화 후 새로 저장
-                YES24Candidate.objects.filter(book_list=bl).delete()
+                KyoboCandidate.objects.filter(book_list=bl).delete()
                 for c in candidates:
-                    YES24Candidate.objects.create(
+                    KyoboCandidate.objects.create(
                         book_list=bl,
                         title=c["title"],
                         subtitle=c.get("subtitle", ""),
@@ -916,25 +918,25 @@ def _yes24_pipeline_worker(job_id: str, q: Queue, cancel_event: threading.Event,
         q.put({"type": "fatal", "error": str(exc)})
     finally:
         q.put(None)
-        _yes24_store.clear_running()
+        _kyobo_store.clear_running()
         _unregister_cancel(job_id)
         from django.core.cache import cache
         cache.delete(_PIPELINE_STATS_CACHE_KEY)
 
 
-def yes24_pipeline_stream(request, job_id: str):
-    return _yes24_store.get_response(job_id)
+def kyobo_pipeline_stream(request, job_id: str):
+    return _kyobo_store.get_response(job_id)
 
 
-# ── YES24 후보 관리 ───────────────────────────────────────────
+# ── 교보문고 후보 관리 ────────────────────────────────────────
 
 @_staff_required
-def get_yes24_candidates(request):
-    """저장된 YES24 후보 목록을 book_list 단위로 반환."""
-    from books.models import YES24Candidate
+def get_kyobo_candidates(request):
+    """저장된 교보문고 후보 목록을 book_list 단위로 반환."""
+    from books.models import KyoboCandidate
 
     raw = (
-        YES24Candidate.objects
+        KyoboCandidate.objects
         .select_related("book_list__author")
         .order_by("book_list__title", "created_at")
     )
@@ -964,8 +966,8 @@ def get_yes24_candidates(request):
 
 @_staff_required
 @require_POST
-def apply_yes24_candidate(request):
-    """선택한 YES24 후보의 상세 페이지를 수집하여 BookList에 덮어씁니다 (2-3).
+def apply_kyobo_candidate(request):
+    """선택한 교보문고 후보의 상세 페이지를 수집하여 BookList에 덮어씁니다 (2-3).
     후보 적용 후 해당 book_list의 후보 전체 삭제 (2-4).
     """
     body = json.loads(request.body or "{}")
@@ -974,8 +976,8 @@ def apply_yes24_candidate(request):
     if not book_list_id or not href:
         return JsonResponse({"error": "book_list_id, href 필요"}, status=400)
 
-    from books.models import BookList, Author, Publisher, YES24Candidate
-    from books.services import fetch_yes24_book_detail, _save_thumbnail
+    from books.models import BookList, Author, Publisher, KyoboCandidate
+    from books.services import fetch_kyobo_book_detail, _save_thumbnail
     import logging as _log
     _logger = _log.getLogger(__name__)
 
@@ -984,9 +986,9 @@ def apply_yes24_candidate(request):
     except BookList.DoesNotExist:
         return JsonResponse({"error": "도서 없음"}, status=404)
 
-    info = fetch_yes24_book_detail(href)
+    info = fetch_kyobo_book_detail(href)
     if not info:
-        return JsonResponse({"error": "YES24 상세 수집 실패"}, status=500)
+        return JsonResponse({"error": "교보문고 상세 수집 실패"}, status=500)
 
     update_fields = []
     prev_description = bl.description
@@ -1025,6 +1027,9 @@ def apply_yes24_candidate(request):
         bl.edition = info["edition_info"]
         update_fields.append("edition")
 
+    bl.source_url = href
+    update_fields.append("source_url")
+
     if update_fields:
         bl.save(update_fields=update_fields)
 
@@ -1041,7 +1046,7 @@ def apply_yes24_candidate(request):
         threading.Thread(target=refresh_embedding, args=(bl,), daemon=True).start()
 
     # 해당 book_list 후보 전체 삭제 (2-4)
-    YES24Candidate.objects.filter(book_list=bl).delete()
+    KyoboCandidate.objects.filter(book_list=bl).delete()
     from django.core.cache import cache
     cache.delete(_PIPELINE_STATS_CACHE_KEY)
 
@@ -1050,15 +1055,15 @@ def apply_yes24_candidate(request):
 
 @_staff_required
 @require_POST
-def dismiss_yes24_candidates(request):
-    """해당 book_list의 YES24 후보를 적용 없이 삭제합니다."""
+def dismiss_kyobo_candidates(request):
+    """해당 book_list의 교보문고 후보를 적용 없이 삭제합니다."""
     body = json.loads(request.body or "{}")
     book_list_id = body.get("book_list_id")
     if not book_list_id:
         return JsonResponse({"error": "book_list_id 필요"}, status=400)
 
-    from books.models import YES24Candidate
-    deleted, _ = YES24Candidate.objects.filter(book_list_id=book_list_id).delete()
+    from books.models import KyoboCandidate
+    deleted, _ = KyoboCandidate.objects.filter(book_list_id=book_list_id).delete()
     from django.core.cache import cache
     cache.delete(_PIPELINE_STATS_CACHE_KEY)
     return JsonResponse({"ok": True, "deleted": deleted})
@@ -1066,10 +1071,10 @@ def dismiss_yes24_candidates(request):
 
 @_staff_required
 @require_POST
-def reset_yes24_candidates(request):
-    """수집된 YES24 후보 전체를 초기화합니다."""
-    from books.models import YES24Candidate
-    deleted, _ = YES24Candidate.objects.all().delete()
+def reset_kyobo_candidates(request):
+    """수집된 교보문고 후보 전체를 초기화합니다."""
+    from books.models import KyoboCandidate
+    deleted, _ = KyoboCandidate.objects.all().delete()
     from django.core.cache import cache
     cache.delete(_PIPELINE_STATS_CACHE_KEY)
     return JsonResponse({"ok": True, "deleted": deleted})

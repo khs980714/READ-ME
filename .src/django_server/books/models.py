@@ -85,6 +85,8 @@ class BookList(models.Model):
     thumbnail = models.ImageField(upload_to="thumbnails/", blank=True, verbose_name="썸네일 이미지",
                                   help_text="저장된 썸네일 파일 (로컬 볼륨 또는 R2)")
     toc = models.TextField(blank=True, verbose_name="목차")
+    source_url = models.URLField(max_length=1000, blank=True, verbose_name="수집 출처 URL",
+                                 help_text="교보문고 등 도서 정보를 수집한 원본 링크")
     categories = models.ManyToManyField(
         Category,
         through="BookListCategory",
@@ -201,25 +203,25 @@ class Book(models.Model):
         return self.book_list.categories
 
 
-class YES24Candidate(models.Model):
-    """YES24 검색 1차 수집 결과 — 사용자가 선택 전까지 임시 저장."""
+class KyoboCandidate(models.Model):
+    """교보문고 검색 1차 수집 결과 — 사용자가 선택 전까지 임시 저장."""
 
     book_list = models.ForeignKey(
         BookList,
         on_delete=models.CASCADE,
-        related_name="yes24_candidates",
+        related_name="kyobo_candidates",
         verbose_name="도서 정보",
     )
     title      = models.CharField(max_length=500, verbose_name="도서명")
     subtitle   = models.CharField(max_length=500, blank=True, verbose_name="부제")
-    href       = models.URLField(max_length=1000, verbose_name="YES24 링크")
+    href       = models.URLField(max_length=1000, verbose_name="교보문고 링크")
     edition_info = models.CharField(max_length=200, blank=True, verbose_name="개정 정보")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = "yes24_candidates"
-        verbose_name = "YES24 후보 도서"
-        verbose_name_plural = "YES24 후보 도서"
+        db_table = "kyobo_candidates"
+        verbose_name = "교보문고 후보 도서"
+        verbose_name_plural = "교보문고 후보 도서"
         ordering = ["book_list", "created_at"]
 
     def __str__(self):

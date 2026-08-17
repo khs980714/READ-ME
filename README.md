@@ -13,7 +13,7 @@
 - 관리자 전용 **데이터 수집 페이지** — 실시간 Progress Bar + 로그로 파이프라인 시각화, **중지 버튼** 지원
 - `book_list` 테이블로 중복 도서 수집 방지 (동일 책은 API 재호출 없이 재사용)
 - LLM 기반 **카테고리 자동 분류** — 도서 제목·설명을 분석해 12개 카테고리 중 1~3개 자동 태깅
-- **멀티소스 정보 수집** — 알라딘 API → YES24 → 교보문고 순 fallback으로 설명·목차 수집
+- **교보문고 스크래핑 기반 정보 수집** — 검색 후보 중 선택해 설명·목차·썸네일 수집
 - **판차·출판 연도 자동 추출** — 제목에서 판차 정보 분리 저장, 연도 메타데이터 추출
 - **IP 기반 Rate Limiting** — FastAPI slowapi로 챗봇 API 과부하 방지
 
@@ -125,7 +125,7 @@ READ-ME/
 | `book_list_categories` | book_list ↔ categories 다대다 |
 | `books` | 도서 코드 레지스트리 — book_code(`D-NNN`) + book_list_id FK |
 | `book_embeddings` | pgvector 임베딩 (dim=1024, book_list 단위) |
-| `yes24_candidates` | YES24 검색 후보 임시 저장 — 관리자 선택 후 book_list 덮어쓰기 |
+| `kyobo_candidates` | 교보문고 검색 후보 임시 저장 — 관리자 선택 후 book_list 덮어쓰기 |
 | `chat_sessions` | 챗봇 세션 (UUID, 비로그인 지원) |
 | `chat_messages` | 대화 메시지 및 질문 유형 |
 | `chat_recommendations` | 응답 추천 도서 + 유사도 점수 |
@@ -139,7 +139,7 @@ READ-ME/
 | `edition` | 판차 정보 (`(개정2판)`, `(심화편)` 등, 제목에서 분리) |
 | `publication_year` | 출판 연도 (제목·설명에서 자동 추출, 4자리) |
 | `description` | 도서 소개 (최대 2,000자) |
-| `toc` | 목차 (최대 3,000자) |
+| `toc` | 목차 (최대 8,000자) |
 | `difficulty` | 난이도 (`입문` / `초급` / `중급` / `고급`) |
 | `thumbnail_url` | 표지 이미지 원본 소스 URL |
 | `thumbnail` | 로컬 저장 썸네일 파일 경로 (표시 시 우선 사용) |
@@ -227,18 +227,16 @@ docker compose exec backend python manage.py run_pipeline --all
 docker compose exec backend python manage.py run_pipeline --book-id 1
 ```
 
-### 멀티소스 정보 수집 전략
+### 정보 수집 전략
 
-도서 설명·목차·썸네일은 아래 순서로 fallback 수집합니다.
+도서 설명·목차·썸네일은 교보문고 스크래핑으로 수집합니다.
 
 ```
-1차: 알라딘 Open API (TTB) — 설명 + 목차(OptResult=toc) + ISBN + 썸네일
-2차: YES24 스크래핑           — 1차에서 누락된 설명·목차 보완
-3차: 교보문고 스크래핑        — 2차에서도 누락된 설명·목차 보완
+교보문고 검색 → 후보 목록 조회 → 상세 페이지 스크래핑 (설명 + 목차 + 저자·출판사 + 썸네일)
 ```
 
 - description 텍스트에 목차가 포함된 경우 **자동으로 설명/목차 분리**
-- 알라딘 후보 검색 결과에서 **수동으로 정확한 도서를 선택**하여 적용 가능 (웹 UI)
+- 검색 후보 목록에서 **수동으로 정확한 도서를 선택**하여 적용 가능 (웹 UI)
 
 ---
 
@@ -259,7 +257,6 @@ cp .env.example .env
 | `DJANGO_SUPERUSER_PASSWORD` | 관리자 비밀번호 |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | DB 접속 정보 |
 | `DATABASE_URL` | `postgresql://<USER>:<PW>@db:5432/<DB>` |
-| `ALADIN_TTB_KEY` | 알라딘 Open API 키 (도서 정보·목차 수집 1차 소스) |
 | `NVIDIA_API_KEY` | NVIDIA NIM API 키 |
 | `NVIDIA_NIM_BASE_URL` / `NVIDIA_LLM_MODEL` / `NVIDIA_EMBEDDING_MODEL` | NVIDIA NIM 엔드포인트 |
 | `LANGCHAIN_API_KEY` | LangSmith 트레이싱 키 |
@@ -273,7 +270,7 @@ cp .env.example .env
 ### 사전 준비
 
 1. **Docker Desktop** 설치 및 실행
-2. **NVIDIA API 키**, **알라딘 TTB API 키** 발급
+2. **NVIDIA API 키** 발급
 
 ### 빠른 시작
 

@@ -335,20 +335,8 @@
 <div class="pipeline-card">
   <h2>전체 데이터 파이프라인 실행</h2>
 
-  <!-- 수집 소스 선택 -->
-  <div style="display:flex; gap:20px; margin-bottom:16px; padding:14px 16px; background:var(--bg); border:1px solid var(--border); border-radius:8px;">
-    <label style="display:inline-flex; align-items:center; gap:7px; cursor:pointer; font-size:0.9rem; font-weight:600;">
-      <input type="radio" name="pipelineSource" value="aladin" checked style="accent-color:var(--primary);">
-      알라딘 API
-    </label>
-    <label style="display:inline-flex; align-items:center; gap:7px; cursor:pointer; font-size:0.9rem; font-weight:600;">
-      <input type="radio" name="pipelineSource" value="yes24" style="accent-color:var(--primary);">
-      YES24
-    </label>
-  </div>
-
   <p class="card-desc" id="pipelineDesc">
-    알라딘 API로 도서 정보(설명·썸네일·목차)를 수집하고,
+    교보문고에서 도서 정보(설명·썸네일·목차)를 수집하고,
     LLM으로 난이도를 분류합니다.
     설명이 없는 <strong>{{ pending }}권</strong>이 대상입니다.
   </p>
@@ -389,21 +377,9 @@
 <div class="pipeline-card">
   <h2>데이터 수집</h2>
 
-  <!-- 수집 소스 선택 -->
-  <div style="display:flex; gap:20px; margin-bottom:16px; padding:14px 16px; background:var(--bg); border:1px solid var(--border); border-radius:8px;">
-    <label style="display:inline-flex; align-items:center; gap:7px; cursor:pointer; font-size:0.9rem; font-weight:600;">
-      <input type="radio" name="collectSource" value="aladin" checked style="accent-color:var(--primary);">
-      알라딘 API
-    </label>
-    <label style="display:inline-flex; align-items:center; gap:7px; cursor:pointer; font-size:0.9rem; font-weight:600;">
-      <input type="radio" name="collectSource" value="yes24" style="accent-color:var(--primary);">
-      YES24
-    </label>
-  </div>
-
   <p class="card-desc" id="collectDesc">
     설명·썸네일·목차가 없는 <strong>{{ pending }}권</strong>을 대상으로
-    알라딘 API에서 도서 정보를 수집합니다.
+    교보문고에서 도서 정보를 수집합니다.
     분류·임베딩은 실행하지 않으므로 단계적으로 진행할 때 사용하세요.
   </p>
 
@@ -688,24 +664,24 @@
   </div>
 </div>
 
-<!-- ── YES24 후보 선택 ── -->
+<!-- ── 교보문고 후보 선택 ── -->
 <div class="pipeline-card">
-  <h2>YES24 후보 선택</h2>
+  <h2>교보문고 후보 선택</h2>
   <p class="card-desc">
-    YES24 수집 파이프라인 실행 후 저장된 후보 목록입니다.
+    교보문고 수집 파이프라인 실행 후 저장된 후보 목록입니다.
     도서별로 수집된 후보 중 하나를 선택하면 상세 페이지에서 썸네일·저자·출판사·설명·목차를 수집하여 DB에 덮어씁니다.
-    현재 대기 중: <strong id="yes24PendingCount">{{ yes24_pending }}</strong>건
+    현재 대기 중: <strong id="kyoboPendingCount">{{ kyobo_pending }}</strong>건
   </p>
 
   <div class="pipeline-controls">
-    <button class="btn-primary" id="btnYes24Load">
+    <button class="btn-primary" id="btnKyoboLoad">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/>
         <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
       </svg>
       후보 목록 불러오기
     </button>
-    <button class="btn-danger" id="btnYes24Reset">
+    <button class="btn-danger" id="btnKyoboReset">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>
         <path d="M9 6V4h6v2"/>
@@ -714,8 +690,8 @@
     </button>
   </div>
 
-  <div id="yes24CandidateWrap" style="display:none; margin-top:16px;">
-    <div id="yes24CandidateList"></div>
+  <div id="kyoboCandidateWrap" style="display:none; margin-top:16px;">
+    <div id="kyoboCandidateList"></div>
   </div>
 </div>
 
@@ -795,12 +771,12 @@
   const SYNC_THUMBNAILS_URL    = "{% url 'books:sync_thumbnails' %}";
   const THUMB_SCAN_URL         = "{% url 'pipeline:thumbnails_scan' %}";
   const THUMB_CLEAN_URL        = "{% url 'pipeline:thumbnails_clean' %}";
-  const YES24_RUN_URL          = "{% url 'pipeline:yes24_run' %}";
-  const YES24_STREAM           = "{% url 'pipeline:yes24_stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
-  const YES24_CANDIDATES_URL   = "{% url 'pipeline:yes24_candidates' %}";
-  const YES24_APPLY_URL        = "{% url 'pipeline:yes24_apply' %}";
-  const YES24_DISMISS_URL      = "{% url 'pipeline:yes24_dismiss' %}";
-  const YES24_RESET_URL        = "{% url 'pipeline:yes24_reset' %}";
+  const KYOBO_RUN_URL          = "{% url 'pipeline:kyobo_run' %}";
+  const KYOBO_STREAM           = "{% url 'pipeline:kyobo_stream' '00000000-0000-0000-0000-000000000000' %}".replace("00000000-0000-0000-0000-000000000000/", "");
+  const KYOBO_CANDIDATES_URL   = "{% url 'pipeline:kyobo_candidates' %}";
+  const KYOBO_APPLY_URL        = "{% url 'pipeline:kyobo_apply' %}";
+  const KYOBO_DISMISS_URL      = "{% url 'pipeline:kyobo_dismiss' %}";
+  const KYOBO_RESET_URL        = "{% url 'pipeline:kyobo_reset' %}";
 
   // ── 공통 로그 렌더러 ─────────────────────────────────────────
   function appendLog(container, type, opts = {}) {
@@ -912,17 +888,14 @@
       item.addEventListener("mouseenter", () => item.style.background = "var(--bg)");
       item.addEventListener("mouseleave", () => item.style.background = "");
 
-      const thumb = document.createElement("div");
-      thumb.style.cssText = "width:46px; height:60px; flex-shrink:0; border-radius:4px; overflow:hidden; background:var(--border);";
-      if (c.thumbnail_url) {
-        thumb.innerHTML = `<img src="${escHtml(c.thumbnail_url)}" style="width:100%;height:100%;object-fit:cover;" loading="lazy">`;
-      }
-
       const info = document.createElement("div");
       info.style.flex = "1";
       info.innerHTML = `
-        <div style="font-weight:600; font-size:0.9rem; margin-bottom:3px;">${escHtml(c.title)}</div>
-        <div style="font-size:0.8rem; color:var(--text-muted);">${escHtml(c.author)} · ${escHtml(c.publisher)}</div>
+        <div style="font-weight:600; font-size:0.9rem; margin-bottom:3px;">
+          ${escHtml(c.title)}
+          ${c.edition_info ? `<span style="margin-left:6px; font-size:0.75rem; background:#e0e7ff; color:#4338ca; border-radius:4px; padding:1px 6px;">${escHtml(c.edition_info)}</span>` : ""}
+        </div>
+        <div style="font-size:0.8rem; color:var(--text-muted);">${escHtml(c.subtitle)}</div>
       `;
 
       const selectBtn = document.createElement("button");
@@ -938,7 +911,7 @@
           const res = await fetch(CANDIDATES_APPLY_URL, {
             method: "POST",
             headers: { "X-CSRFToken": CSRF_TOKEN, "Content-Type": "application/json" },
-            body: JSON.stringify({ book_list_id: bookListId, item_id: c.item_id }),
+            body: JSON.stringify({ book_list_id: bookListId, href: c.href }),
           });
           const data = await res.json();
           if (data.ok) {
@@ -959,7 +932,6 @@
         }
       });
 
-      item.appendChild(thumb);
       item.appendChild(info);
       item.appendChild(selectBtn);
       candList.appendChild(item);
@@ -968,52 +940,22 @@
     overlay.style.display = "flex";
   }
 
-  // ── 파이프라인 소스 선택 ────────────────────────────────────
-  const pipelineDescEl = document.getElementById("pipelineDesc");
-  const DESC_ALADIN = `알라딘 API로 도서 정보(설명·썸네일·목차)를 수집하고, LLM으로 난이도를 분류합니다. 설명이 없는 <strong>{{ pending }}권</strong>이 대상입니다.`;
-  const DESC_YES24  = `YES24 검색에서 도서별 후보 목록을 수집하여 저장합니다. 수집 후 <strong>YES24 후보 선택</strong> 카드에서 원하는 도서를 선택해 DB에 덮어쓸 수 있습니다.`;
-
-  document.querySelectorAll("input[name='pipelineSource']").forEach(radio => {
-    radio.addEventListener("change", () => {
-      pipelineDescEl.innerHTML = radio.value === "yes24" ? DESC_YES24 : DESC_ALADIN;
-    });
-  });
-
-  function getSelectedSource() {
-    return document.querySelector("input[name='pipelineSource']:checked")?.value || "aladin";
-  }
-
-  // ── 데이터 수집 소스 선택 ────────────────────────────────────
-  const collectDescEl = document.getElementById("collectDesc");
-  const COLLECT_DESC_ALADIN = `설명·썸네일·목차가 없는 <strong>{{ pending }}권</strong>을 대상으로 알라딘 API에서 도서 정보를 수집합니다. 분류·임베딩은 실행하지 않으므로 단계적으로 진행할 때 사용하세요.`;
-  const COLLECT_DESC_YES24  = `YES24 검색에서 도서별 후보 목록을 수집하여 저장합니다. 수집 후 <strong>YES24 후보 선택</strong> 카드에서 원하는 도서를 선택해 DB에 덮어쓸 수 있습니다.`;
-
-  document.querySelectorAll("input[name='collectSource']").forEach(radio => {
-    radio.addEventListener("change", () => {
-      collectDescEl.innerHTML = radio.value === "yes24" ? COLLECT_DESC_YES24 : COLLECT_DESC_ALADIN;
-    });
-  });
-
-  function getCollectSource() {
-    return document.querySelector("input[name='collectSource']:checked")?.value || "aladin";
-  }
-
-  // ── YES24 후보 선택 카드 ─────────────────────────────────────
+  // ── 교보문고 후보 선택 카드 ───────────────────────────────────
   (function () {
-    const btnLoad   = document.getElementById("btnYes24Load");
-    const btnReset  = document.getElementById("btnYes24Reset");
-    const wrap      = document.getElementById("yes24CandidateWrap");
-    const listEl    = document.getElementById("yes24CandidateList");
-    const countEl   = document.getElementById("yes24PendingCount");
+    const btnLoad   = document.getElementById("btnKyoboLoad");
+    const btnReset  = document.getElementById("btnKyoboReset");
+    const wrap      = document.getElementById("kyoboCandidateWrap");
+    const listEl    = document.getElementById("kyoboCandidateList");
+    const countEl   = document.getElementById("kyoboPendingCount");
 
     btnLoad.addEventListener("click", loadCandidates);
 
     btnReset.addEventListener("click", async () => {
       const cur = parseInt(countEl.textContent || "0");
-      if (!confirm(`수집된 YES24 후보 전체(${cur}건)를 초기화합니다.\n다음 파이프라인 실행 시 처음부터 다시 수집합니다.\n계속하겠습니까?`)) return;
+      if (!confirm(`수집된 교보문고 후보 전체(${cur}건)를 초기화합니다.\n다음 파이프라인 실행 시 처음부터 다시 수집합니다.\n계속하겠습니까?`)) return;
       btnReset.disabled = true;
       try {
-        const res  = await fetch(YES24_RESET_URL, {
+        const res  = await fetch(KYOBO_RESET_URL, {
           method: "POST",
           headers: { "X-CSRFToken": CSRF_TOKEN },
         });
@@ -1036,7 +978,7 @@
       btnLoad.disabled = true;
       btnLoad.textContent = "불러오는 중...";
       try {
-        const res  = await fetch(YES24_CANDIDATES_URL);
+        const res  = await fetch(KYOBO_CANDIDATES_URL);
         const data = await res.json();
         renderGroups(data.groups || []);
         wrap.style.display = "block";
@@ -1115,9 +1057,9 @@
       const msg = groupEl.querySelector(".group-msg");
       msg.style.display = "block";
       msg.style.color = "var(--text-muted)";
-      msg.textContent = "YES24 상세 페이지 수집 중...";
+      msg.textContent = "교보문고 상세 페이지 수집 중...";
       try {
-        const res  = await fetch(YES24_APPLY_URL, {
+        const res  = await fetch(KYOBO_APPLY_URL, {
           method: "POST",
           headers: { "X-CSRFToken": CSRF_TOKEN, "Content-Type": "application/json" },
           body: JSON.stringify({ book_list_id: bookListId, href }),
@@ -1144,7 +1086,7 @@
 
     async function dismiss(bookListId, groupEl) {
       try {
-        await fetch(YES24_DISMISS_URL, {
+        await fetch(KYOBO_DISMISS_URL, {
           method: "POST",
           headers: { "X-CSRFToken": CSRF_TOKEN, "Content-Type": "application/json" },
           body: JSON.stringify({ book_list_id: bookListId }),
@@ -1431,9 +1373,8 @@
 
   // ── 파이프라인 섹션 ──────────────────────────────────────────
   createStreamHandler({
-    runUrl:       () => getSelectedSource() === "yes24" ? YES24_RUN_URL    : PIPELINE_RUN_URL,
-    streamBase:   () => getSelectedSource() === "yes24" ? YES24_STREAM     : PIPELINE_STREAM,
-    extraBody:    () => getSelectedSource() === "yes24" ? { resume: true } : {},
+    runUrl:       PIPELINE_RUN_URL,
+    streamBase:   PIPELINE_STREAM,
     btn:          document.getElementById("btnPipeline"),
     stopBtn:      document.getElementById("btnPipelineStop"),
     statusBadge:  document.getElementById("pipelineStatus"),
@@ -1979,9 +1920,8 @@
 
   // ── 데이터 수집 섹션 ─────────────────────────────────────────
   createStreamHandler({
-    runUrl:       () => getCollectSource() === "yes24" ? YES24_RUN_URL    : COLLECT_RUN_URL,
-    streamBase:   () => getCollectSource() === "yes24" ? YES24_STREAM     : COLLECT_STREAM,
-    extraBody:    () => getCollectSource() === "yes24" ? { resume: true } : {},
+    runUrl:       COLLECT_RUN_URL,
+    streamBase:   COLLECT_STREAM,
     btn:          document.getElementById("btnCollect"),
     stopBtn:      document.getElementById("btnCollectStop"),
     statusBadge:  document.getElementById("collectStatus"),

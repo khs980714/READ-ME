@@ -23,7 +23,7 @@ graph LR
     end
 
     NVIDIA["NVIDIA NIM API"]
-    Aladin["알라딘 Open API"]
+    Kyobo["교보문고 (스크래핑)"]
     LangSmith["LangSmith"]
 
     Browser -- "HTTP / SSE" --> Django
@@ -31,7 +31,7 @@ graph LR
     Django -- psycopg2 --> DB
     FastAPI -- psycopg2 --> DB
     FastAPI -- HTTPS --> NVIDIA
-    Django -- HTTPS --> Aladin
+    Django -- HTTPS --> Kyobo
     FastAPI -.-> LangSmith
 ```
 
@@ -45,7 +45,7 @@ graph TD
         BookList["BookList (마스터)"]
         Book["Book (코드 레지스트리)"]
         Category["Category"]
-        YES24["YES24Candidate"]
+        Kyobo["KyoboCandidate"]
         Embedding["BookEmbedding"]
     end
 
@@ -62,7 +62,7 @@ graph TD
 
     BookList --> Book
     BookList --> Embedding
-    BookList --> YES24
+    BookList --> Kyobo
     Session --> Message
     Message --> Rec
     Book --> Rec
@@ -86,25 +86,23 @@ flowchart TD
     DB_init --> Step6
 
     subgraph pipeline["파이프라인 (순서 실행)"]
-        Step1["① 멀티소스 정보 수집"] --> Step2["② 난이도 분류 (LLM)"] --> Step3["③ 임베딩 생성 (nv-embedqa)"]
+        Step1["① 정보 수집 (교보문고)"] --> Step2["② 난이도 분류 (LLM)"] --> Step3["③ 임베딩 생성 (nv-embedqa)"]
     end
 
     subgraph extra["별도 파이프라인"]
         Step4["출판 연도 추출"]
         Step5["카테고리 분류 (LLM)"]
-        Step6["YES24 후보 수집 → 수동 선택"]
+        Step6["교보문고 후보 수집 → 수동 선택"]
     end
 
     pipeline --> DB_final[("PostgreSQL")]
     extra --> DB_final
 ```
 
-### 멀티소스 정보 수집 전략
+### 정보 수집 전략
 
 ```
-알라딘 API (1차) → description · toc · thumbnail_url
-YES24 스크래핑 (2차) → 누락 필드 보완
-교보문고 스크래핑 (3차) → 누락 필드 보완
+교보문고 검색 → 후보 선택 → 상세 페이지 스크래핑 → description · toc · thumbnail_url
 ```
 
 ### 난이도 분류 플로우 (v2 — 미리보기 방식)
@@ -155,7 +153,7 @@ graph LR
     book_list --> book_embeddings
     book_list --> book_list_categories
     categories --> book_list_categories
-    book_list --> yes24_candidates
+    book_list --> kyobo_candidates
     chat_sessions --> chat_messages
     chat_messages --> chat_recommendations
     books --> chat_recommendations
