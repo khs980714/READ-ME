@@ -6,7 +6,6 @@
 {% block content %}
 <section class="page-header">
   <h1 class="page-title">도서 목록</h1>
-  <p class="page-desc">IT·개발 도서를 탐색하고 나에게 맞는 책을 찾아보세요.</p>
 </section>
 
 <!-- ── 검색·필터 ──────────────────────────────────────────── -->
@@ -20,14 +19,6 @@
     </div>
 
     <div class="filter-controls">
-      <select name="difficulty" class="filter-select">
-        <option value="">난이도 전체</option>
-        <option value="미분류" {% if selected_difficulty == "미분류" %}selected{% endif %}>미분류</option>
-        {% for val, label in difficulties %}
-          <option value="{{ val }}" {% if selected_difficulty == val %}selected{% endif %}>{{ label }}</option>
-        {% endfor %}
-      </select>
-
       <select name="category" class="filter-select">
         <option value="">카테고리 전체</option>
         {% for cat in categories %}

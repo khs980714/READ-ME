@@ -640,9 +640,9 @@ button { cursor: pointer; font-family: inherit; }
     flex-wrap: wrap;
     gap: 8px;
   }
-  /* 난이도·카테고리 select: 각 행 절반씩 꽉 채움 */
+  /* 카테고리 select: 한 행 전체를 채움 */
   .filter-controls .filter-select {
-    flex: 1 1 calc(50% - 4px);
+    flex: 1 1 100%;
     min-width: 0;
     width: auto;
   }
