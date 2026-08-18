@@ -4,25 +4,17 @@
 수험서·사례집·프로젝트 중심 도서를 추천합니다.
 """
 
-from pathlib import Path
-
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from chains.retriever import extract_certification_name, extract_exam_type
-from chains.utils import build_history_messages
-from llm import get_llm
+from chains.utils import build_history_messages, load_prompt, run_chain, stream_chain
 
-_PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "career_certification.txt"
-
-_SYSTEM_PROMPT: str = (
-    _PROMPT_PATH.read_text(encoding="utf-8")
-    if _PROMPT_PATH.exists()
-    else (
-        "당신은 IT 자격증·취업 준비 전문 컨설턴트입니다. "
-        "자격증 수험서, 포트폴리오 프로젝트 사례집, 실무 중심 도서를 우선적으로 추천해주세요. "
-        "추천 도서는 반드시 제공된 목록에서만 선택하고, "
-        "해당 자격증이나 포트폴리오 목표 달성에 어떻게 도움이 되는지 구체적으로 설명해주세요."
-    )
+_SYSTEM_PROMPT: str = load_prompt(
+    "career_certification",
+    "당신은 IT 자격증·취업 준비 전문 컨설턴트입니다. "
+    "자격증 수험서, 포트폴리오 프로젝트 사례집, 실무 중심 도서를 우선적으로 추천해주세요. "
+    "추천 도서는 반드시 제공된 목록에서만 선택하고, "
+    "해당 자격증이나 포트폴리오 목표 달성에 어떻게 도움이 되는지 구체적으로 설명해주세요.",
 )
 
 
@@ -86,13 +78,10 @@ def _build_messages(inputs: dict) -> list:
 
 
 async def career_certification_chain(inputs: dict) -> str:
-    llm = get_llm()
-    response = await llm.ainvoke(_build_messages(inputs))
-    return response.content
+    return await run_chain(_build_messages, inputs)
 
 
 async def career_certification_chain_stream(inputs: dict):
     """토큰 단위로 스트리밍하는 async generator."""
-    llm = get_llm()
-    async for chunk in llm.astream(_build_messages(inputs)):
-        yield chunk.content
+    async for chunk in stream_chain(_build_messages, inputs):
+        yield chunk

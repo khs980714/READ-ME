@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     NVIDIA_API_KEY: str = ""
     NVIDIA_NIM_BASE_URL: str = "https://integrate.api.nvidia.com/v1"
     NVIDIA_LLM_MODEL: str = "meta/llama-3.1-70b-instruct"
-    NVIDIA_EMBEDDING_MODEL: str = "nvidia/llama-3.2-nv-embedqa-1b-v2"
+    NVIDIA_EMBEDDING_MODEL: str = "nvidia/llama-nemotron-embed-1b-v2"
 
     # Supabase PostgreSQL (pgvector)
     DATABASE_URL: str = ""
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     RECOMMENDATION_THRESHOLD_LEVEL_BASED: float = 0.35
     RECOMMENDATION_MAX: int = 10
 
-    # 임베딩 차원 (nvidia/llama-3.2-nv-embedqa-1b-v2 = 2048)
+    # 임베딩 차원 (nvidia/llama-nemotron-embed-1b-v2 = 2048, EOL된 llama-3.2-nv-embedqa-1b-v2 후속 모델)
     # DB 컬럼(book_embeddings.embedding)과 반드시 일치해야 합니다.
     # 변경 시 새 마이그레이션으로 컬럼 차원도 함께 변경하세요.
     EMBEDDING_DIM: int = 2048

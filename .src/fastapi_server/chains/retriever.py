@@ -9,7 +9,7 @@ import re
 
 from chains.utils import DIFFICULTY_ORDER
 from config import settings
-from db import keyword_search, vector_search, vector_search_by_difficulty
+from db import keyword_search, vector_search
 from llm import get_embeddings
 
 # ── 자격증명 추출 패턴 ─────────────────────────────────────────
@@ -250,7 +250,7 @@ async def retrieve_books_level_based(
         return books, None, None
 
     # 1) 요청 난이도 정확 검색
-    books = await vector_search_by_difficulty(q_embedding, threshold, limit, detected_level)
+    books = await vector_search(q_embedding, threshold, limit, detected_level)
     if books:
         return books, detected_level, None
 
@@ -259,7 +259,7 @@ async def retrieve_books_level_based(
     # 2) 더 쉬운 난이도로 fallback
     for i in range(idx - 1, -1, -1):
         fallback = DIFFICULTY_ORDER[i]
-        books = await vector_search_by_difficulty(q_embedding, threshold, limit, fallback)
+        books = await vector_search(q_embedding, threshold, limit, fallback)
         if books:
             return books, fallback, (
                 f"요청하신 **{detected_level}** 수준의 도서가 없어 "
@@ -269,7 +269,7 @@ async def retrieve_books_level_based(
     # 3) 더 어려운 난이도로 fallback
     for i in range(idx + 1, len(DIFFICULTY_ORDER)):
         fallback = DIFFICULTY_ORDER[i]
-        books = await vector_search_by_difficulty(q_embedding, threshold, limit, fallback)
+        books = await vector_search(q_embedding, threshold, limit, fallback)
         if books:
             return books, fallback, (
                 f"요청하신 **{detected_level}** 수준 및 더 쉬운 수준의 도서가 없어 "

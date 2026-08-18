@@ -4,14 +4,16 @@
 메타데이터(difficulty) 필터링으로 좁혀진 도서 목록을 기반으로 추천합니다.
 """
 
-from pathlib import Path
-
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from chains.utils import DIFFICULTY_ORDER, build_history_messages
-from llm import get_llm
-
-_PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "level_based.txt"
+from chains.utils import (
+    DIFFICULTY_ORDER,
+    build_history_messages,
+    format_book_line,
+    load_prompt,
+    run_chain,
+    stream_chain,
+)
 
 # 난이도별 키워드 매핑
 # 우선순위: 질문에 여러 수준 키워드가 동시에 있으면 가장 높은 난이도를 반환합니다.
@@ -52,14 +54,11 @@ def extract_difficulty_from_question(question: str) -> str | None:
     return None
 
 
-_SYSTEM_PROMPT: str = (
-    _PROMPT_PATH.read_text(encoding="utf-8")
-    if _PROMPT_PATH.exists()
-    else (
-        "당신은 IT·개발 도서 전문 큐레이터입니다. "
-        "사용자의 현재 수준에 딱 맞는 도서를 추천하고, 각 도서가 왜 적합한지 설명해주세요. "
-        "추천 도서는 반드시 제공된 목록에서만 선택하세요."
-    )
+_SYSTEM_PROMPT: str = load_prompt(
+    "level_based",
+    "당신은 IT·개발 도서 전문 큐레이터입니다. "
+    "사용자의 현재 수준에 딱 맞는 도서를 추천하고, 각 도서가 왜 적합한지 설명해주세요. "
+    "추천 도서는 반드시 제공된 목록에서만 선택하세요.",
 )
 
 
@@ -71,14 +70,7 @@ def _build_messages(inputs: dict) -> list:
     actual_level = inputs.get("actual_level")
     fallback_note = inputs.get("fallback_note")
 
-    book_list = "\n".join(
-        "- {} {} (난이도: {})".format(
-            b.get("book_code") or "D-{:03d}".format(b["book_list_id"]),
-            b["title"],
-            b.get("difficulty", "미분류"),
-        )
-        for b in books
-    )
+    book_list = "\n".join(format_book_line(b) for b in books)
 
     level_note = f"\n사용자 요청 수준: {detected_level}" if detected_level else ""
     actual_note = (
@@ -103,13 +95,10 @@ def _build_messages(inputs: dict) -> list:
 
 
 async def level_based_chain(inputs: dict) -> str:
-    llm = get_llm()
-    response = await llm.ainvoke(_build_messages(inputs))
-    return response.content
+    return await run_chain(_build_messages, inputs)
 
 
 async def level_based_chain_stream(inputs: dict):
     """토큰 단위로 스트리밍하는 async generator."""
-    llm = get_llm()
-    async for chunk in llm.astream(_build_messages(inputs)):
-        yield chunk.content
+    async for chunk in stream_chain(_build_messages, inputs):
+        yield chunk

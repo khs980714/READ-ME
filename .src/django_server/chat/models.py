@@ -24,10 +24,17 @@ class ChatMessage(models.Model):
         ASSISTANT = "assistant", "AI"
 
     class QuestionType(models.TextChoices):
-        ROADMAP = "roadmap", "학습 로드맵"
-        LEVEL_BASED = "level_based", "수준별 추천"
-        GENERAL = "general", "일반 도서 질문"
-        UNRELATED = "unrelated", "도서 무관"
+        """FastAPI 분류기(chains/classifier.py)가 실제로 반환하는 값과 일치시킴.
+
+        주의: 질문 유형 분류 체계 자체는 별도로 전면 개편 예정이므로, 여기서는
+        Admin 필터·표시가 실제 저장값을 인식하도록 값만 맞추고 구조는 바꾸지 않음.
+        """
+        KEYWORD_SEARCH        = "keyword_search",        "도서 목록 조회"
+        SPECIFIC_SEARCH       = "specific_search",        "특정 기술·키워드 탐색"
+        GOAL_ORIENTED         = "goal_oriented",           "진로·목적 큐레이션"
+        CAREER_CERTIFICATION  = "career_certification",    "자격증·포트폴리오"
+        LEVEL_BASED           = "level_based",             "수준별 추천"
+        OUT_OF_SCOPE          = "out_of_scope",             "도서 무관"
 
     session = models.ForeignKey(ChatSession, on_delete=models.CASCADE, related_name="messages", verbose_name="세션")
     role = models.CharField(max_length=20, choices=Role.choices, verbose_name="역할")

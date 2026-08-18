@@ -18,6 +18,8 @@ from bs4 import BeautifulSoup
 from django.conf import settings
 from django.core.files.base import ContentFile
 
+from .models import BookList, Category
+
 logger = logging.getLogger(__name__)
 
 
@@ -30,7 +32,7 @@ _CONTENT_TYPE_TO_EXT = {
 }
 
 
-def _save_thumbnail(book_list, url: str) -> bool:
+def save_thumbnail(book_list, url: str) -> bool:
     """URL에서 이미지를 다운로드하여 book_list.thumbnail 필드에 저장합니다.
 
     저장만 수행하고 model.save()는 호출하지 않습니다 — 호출 측에서 update_fields에
@@ -76,6 +78,33 @@ def _save_thumbnail(book_list, url: str) -> bool:
     except Exception as exc:
         logger.warning("썸네일 다운로드 실패 (book_list_id=%s): %s", book_list.pk, exc)
         return False
+
+
+def bulk_refresh_thumbnails(queryset, on_item=None) -> tuple[int, int]:
+    """주어진 BookList 쿼리셋의 썸네일을 일괄 재다운로드합니다.
+
+    기존 파일을 먼저 삭제한 뒤 thumbnail_url에서 재다운로드합니다 (덮어쓰기 보장).
+    다운로드 실패 + 기존 파일이 삭제된 경우 DB 필드도 함께 비워 일치시킵니다.
+    on_item(book_list, success: bool)이 주어지면 각 항목 처리 후 호출됩니다
+    (management command의 진행 로그 출력 등에 사용).
+
+    반환: (성공 건수, 실패 건수)
+    """
+    ok = fail = 0
+    for bl in queryset.iterator():
+        if bl.thumbnail:
+            bl.thumbnail.delete(save=False)
+        success = save_thumbnail(bl, bl.thumbnail_url)
+        if success:
+            bl.save(update_fields=["thumbnail"])
+            ok += 1
+        else:
+            if not bl.thumbnail.name:
+                bl.save(update_fields=["thumbnail"])
+            fail += 1
+        if on_item:
+            on_item(bl, success)
+    return ok, fail
 
 # ── 판차 / 연도 패턴 ──────────────────────────────────────────
 
@@ -312,10 +341,9 @@ def fetch_kyobo_candidates(title: str, max_results: int = 10) -> list[dict]:
 
 def clean_toc_artifacts(text: str) -> str:
     """목차 텍스트에서 스크래핑 시 남는 UI 잔여 문자(접어보기 등)를 제거하고 정리합니다."""
-    import re as _re
-    text = _re.sub(r'(?m)^\s*(미리보기|펼쳐보기|접기|접어보기)\s*$', '', text)
-    text = _re.sub(r'\s*(접어보기)\s*', ' ', text)
-    text = _re.sub(r'\n{3,}', '\n\n', text)
+    text = re.sub(r'(?m)^\s*(미리보기|펼쳐보기|접기|접어보기)\s*$', '', text)
+    text = re.sub(r'\s*(접어보기)\s*', ' ', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
 
@@ -327,7 +355,6 @@ def scrape_from_url(url: str) -> dict:
         {"status": "unsupported"}                   — 미지원 소스
         {"status": "error",       "message": str}  — 수집 실패
     """
-    from urllib.parse import urlparse
     parsed = urlparse(url.strip())
     host = parsed.netloc.lower().lstrip("www.")
 
@@ -439,6 +466,61 @@ def classify_category(title: str, description: str) -> list[str]:
         return []
 
 
+# ── 도서 추가/수정 폼 공용 헬퍼 (book_add / book_edit에서 공유) ─────
+
+def extract_book_form(request) -> dict:
+    """도서 추가/수정 폼의 POST 데이터를 파싱합니다."""
+    pub_year_str = request.POST.get("publication_year", "").strip()
+    return {
+        "title":             request.POST.get("title", "").strip(),
+        "subtitle":          request.POST.get("subtitle", "").strip(),
+        "edition":           request.POST.get("edition", "").strip(),
+        "author_name":       request.POST.get("author", "").strip(),
+        "publisher_name":    request.POST.get("publisher", "").strip(),
+        "difficulty":        request.POST.get("difficulty", ""),
+        "publication_year":  int(pub_year_str) if pub_year_str.isdigit() else None,
+        "thumbnail_url":     request.POST.get("thumbnail_url", "").strip(),
+        "description":       request.POST.get("description", "").strip(),
+        "toc":               request.POST.get("toc", "").strip(),
+        "source_url":        request.POST.get("source_url", "").strip(),
+        "category_ids":      request.POST.getlist("categories"),
+        "is_active":         request.POST.get("is_active") == "on",
+        "confirm_link":      request.POST.get("confirm_link") == "true",
+    }
+
+
+def find_duplicate_booklist(title, edition, author, publisher, exclude_pk: int | None = None):
+    """동일한 (title, edition, author, publisher) BookList가 있으면 반환합니다 (없으면 None).
+
+    exclude_pk를 지정하면 해당 pk의 BookList는 검색 대상에서 제외합니다
+    (수정 화면에서 "자기 자신과의 중복"을 중복으로 취급하지 않기 위함).
+    """
+    qs = BookList.objects.filter(title=title, edition=edition, author=author, publisher=publisher)
+    if exclude_pk is not None:
+        qs = qs.exclude(pk=exclude_pk)
+    return qs.first()
+
+
+def auto_classify_book(
+    title: str, description: str, difficulty: str, category_ids: list, difficulties
+) -> tuple[str, list]:
+    """난이도·카테고리가 미선택이고 도서 소개가 있으면 LLM으로 자동 분류합니다.
+
+    이미 선택된 값이 있으면 그대로 반환합니다 (자동 분류로 덮어쓰지 않음).
+    """
+    if not difficulty and description:
+        classified_difficulty = classify_difficulty(title, description, [])
+        if classified_difficulty in dict(difficulties):
+            difficulty = classified_difficulty
+    if not category_ids and description:
+        classified_names = classify_category(title, description)
+        if classified_names:
+            category_ids = list(
+                Category.objects.filter(name__in=classified_names).values_list("id", flat=True)
+            )
+    return difficulty, category_ids
+
+
 def generate_embedding(book_list_id: int, title: str, description: str) -> bool:
     """FastAPI /embed/book 호출 → book_embeddings 적재."""
     try:
@@ -503,14 +585,14 @@ def run_booklist_pipeline(
     # 썸네일 이미지 저장 — URL은 있지만 저장된 파일이 없는 경우
     if book_list.thumbnail_url and not book_list.thumbnail:
         _log("썸네일 이미지 저장 중...")
-        if _save_thumbnail(book_list, book_list.thumbnail_url):
+        if save_thumbnail(book_list, book_list.thumbnail_url):
             update_fields.append("thumbnail")
 
     # 2) 난이도 분류 — difficulty가 없고 description이 있을 때만 실행
     if not book_list.difficulty and book_list.description:
         _log("난이도 분류 중...")
         difficulty = classify_difficulty(book_list.title, book_list.description, [])
-        if difficulty and difficulty in ("입문", "초급", "중급", "고급"):
+        if difficulty and difficulty in BookList.Difficulty.values:
             book_list.difficulty = difficulty
             update_fields.append("difficulty")
     elif not book_list.difficulty and not book_list.description:
@@ -563,7 +645,7 @@ def collect_book_data(book_list, force: bool = False) -> dict:
 
     # 썸네일 이미지 저장 — URL은 있지만 저장된 파일이 없는 경우 (force 시 재다운로드)
     if book_list.thumbnail_url and (force or not book_list.thumbnail):
-        if _save_thumbnail(book_list, book_list.thumbnail_url):
+        if save_thumbnail(book_list, book_list.thumbnail_url):
             update_fields.append("thumbnail")
 
     if update_fields:
@@ -572,7 +654,7 @@ def collect_book_data(book_list, force: bool = False) -> dict:
     # 난이도 분류 (description 있을 때)
     if book_list.description and (force or not book_list.difficulty):
         difficulty = classify_difficulty(book_list.title, book_list.description, [])
-        if difficulty and difficulty in ("입문", "초급", "중급", "고급"):
+        if difficulty and difficulty in BookList.Difficulty.values:
             book_list.difficulty = difficulty
             book_list.save(update_fields=["difficulty"])
             if "difficulty" not in update_fields:

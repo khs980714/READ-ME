@@ -1,7 +1,7 @@
 """
 LLM / Embedding 클라이언트 — NVIDIA NIM (OpenAI 호환 엔드포인트)
 - LLM:       NVIDIA_LLM_MODEL       (예: meta/llama-3.1-70b-instruct)
-- Embedding: NVIDIA_EMBEDDING_MODEL (예: nvidia/nv-embedqa-e5-v5)
+- Embedding: NVIDIA_EMBEDDING_MODEL (예: nvidia/llama-nemotron-embed-1b-v2)
 """
 
 import logging

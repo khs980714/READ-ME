@@ -1,3 +1,5 @@
+import logging
+
 from django.contrib.auth import authenticate
 from django.contrib.auth import logout as auth_logout
 from django.http import HttpResponseRedirect
@@ -11,9 +13,11 @@ from .middleware import (
     clear_jwt_cookies,
     create_access_token,
     create_refresh_token,
-    _set_access_cookie,
-    _set_refresh_cookie,
+    set_access_cookie,
+    set_refresh_cookie,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def login_page(request):
@@ -31,8 +35,8 @@ def login_page(request):
         user = authenticate(request, username=username, password=password)
         if user and user.is_active:
             response = HttpResponseRedirect(next_url)
-            _set_access_cookie(response,  create_access_token(user))
-            _set_refresh_cookie(response, create_refresh_token(user))
+            set_access_cookie(response,  create_access_token(user))
+            set_refresh_cookie(response, create_refresh_token(user))
             return response
         else:
             error = "아이디 또는 비밀번호가 올바르지 않습니다."
@@ -45,8 +49,8 @@ def logout_view(request):
     # Django 세션 제거 (Admin 세션 병행 사용 시에도 안전하게 처리)
     try:
         auth_logout(request)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("auth_logout 처리 중 예외 (JWT 쿠키 삭제는 계속 진행): %s", exc)
 
     response = HttpResponseRedirect(reverse("books:list"))
     # 로그인 시와 동일한 속성으로 삭제해야 브라우저가 확실히 제거

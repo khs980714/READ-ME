@@ -167,11 +167,19 @@ def _reorder_by_mentioned_codes(answer: str, retrieved: list) -> list:
     return prioritized + rest
 
 
-def _build_recommendations(retrieved: list) -> list[RecItem]:
+def _build_recommendation_dicts(retrieved: list) -> list[dict]:
+    """재정렬된 도서 목록 → {book_list_id, score, rank} 딕셔너리 목록.
+
+    비스트리밍(ChatResponse)·스트리밍(SSE done 이벤트) 양쪽에서 공유하는 변환 로직.
+    """
     return [
-        RecItem(book_list_id=b["book_list_id"], score=b["score"], rank=i + 1)
+        {"book_list_id": b["book_list_id"], "score": b["score"], "rank": i + 1}
         for i, b in enumerate(retrieved)
     ]
+
+
+def _build_recommendations(retrieved: list) -> list[RecItem]:
+    return [RecItem(**d) for d in _build_recommendation_dicts(retrieved)]
 
 
 _RATE_LIMIT_MSG = "AI 서버가 잠시 바쁩니다. 잠시 후 다시 시도해주세요."
@@ -247,10 +255,7 @@ async def chat_message_stream(request: Request, req: ChatRequest):
 
         # 5) 완료 + 추천 도서 (LLM이 언급한 코드 순서로 재정렬)
         reordered = _reorder_by_mentioned_codes(full_answer, retrieved)
-        recommendations = [
-            {"book_list_id": b["book_list_id"], "score": b["score"], "rank": i + 1}
-            for i, b in enumerate(reordered)
-        ]
+        recommendations = _build_recommendation_dicts(reordered)
         yield f"data: {_json.dumps({'type': 'done', 'question_type': question_type, 'recommendations': recommendations})}\n\n"
 
     return StreamingResponse(

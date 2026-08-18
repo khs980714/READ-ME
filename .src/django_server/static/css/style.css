@@ -611,6 +611,40 @@ button { cursor: pointer; font-family: inherit; }
 .scroll-top-btn--visible { opacity: 1; visibility: visible; transform: translateY(0); }
 .scroll-top-btn:hover { background: var(--primary-dark, #3b2f7f); }
 
+/* ── 유휴 타임아웃 모달 ──────────────────────────────────────── */
+.idle-modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, .5);
+  align-items: center;
+  justify-content: center;
+}
+.idle-modal-overlay.show { display: flex; }
+.idle-modal-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 32px 36px;
+  max-width: 360px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, .2);
+}
+.idle-modal-icon { margin: 0 auto 16px; }
+.idle-modal-title { font-size: 1.05rem; font-weight: 700; margin-bottom: 8px; }
+.idle-modal-desc { font-size: 0.88rem; color: #555; margin-bottom: 20px; }
+.idle-modal-btn {
+  background: #504197;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 24px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 /* ── Responsive ──────────────────────────────────────────── */
 @media (max-width: 768px) {
   /* 네비게이션 바: 좁은 화면에서 가로 스크롤로 처리 */

@@ -60,9 +60,8 @@ async def lifespan(app: FastAPI):
     _verify_embedding_dim()
     yield
     # 서버 종료 시 커넥션 풀 해제
-    from db import _pool
-    if _pool is not None:
-        _pool.closeall()
+    from db import close_pool
+    close_pool()
 
 
 app = FastAPI(

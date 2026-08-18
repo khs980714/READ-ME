@@ -4,7 +4,15 @@ import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-insecure-key-change-in-production")
+_django_secret_env = os.getenv("DJANGO_SECRET_KEY", "")
+if not _django_secret_env:
+    import warnings
+    warnings.warn(
+        "DJANGO_SECRET_KEY 환경변수가 설정되지 않았습니다. "
+        "개발용 기본값으로 폴백합니다. 프로덕션 환경에서는 반드시 설정하세요.",
+        stacklevel=2,
+    )
+SECRET_KEY = _django_secret_env or "dev-insecure-key-change-in-production"
 DEBUG = os.getenv("DJANGO_DEBUG", "True") == "True"
 
 _raw_hosts = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1")
@@ -24,8 +32,9 @@ try:
     _container_ip = socket.gethostbyname(socket.gethostname())
     if _container_ip not in ALLOWED_HOSTS:
         ALLOWED_HOSTS.append(_container_ip)
-except Exception:
-    pass
+except socket.gaierror as exc:
+    import logging
+    logging.getLogger(__name__).debug("컨테이너 IP 조회 실패 (무시됨): %s", exc)
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -193,7 +202,5 @@ JWT_REFRESH_TOKEN_LIFETIME = timedelta(
 JWT_IDLE_TIMEOUT_MINUTES = int(os.getenv("JWT_IDLE_TIMEOUT_MINUTES", "30"))
 
 # ── External services ─────────────────────────────────────────
-NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID", "")
-NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET", "")
 MODEL_SERVER_URL = os.getenv("MODEL_SERVER_URL", "http://localhost:8001")
 

@@ -4,24 +4,16 @@
 자기개발 → IT 입문 → 심화 순의 로드맵 형식으로 도서를 추천합니다.
 """
 
-from pathlib import Path
-
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from chains.utils import build_history_messages
-from llm import get_llm
+from chains.utils import build_history_messages, format_book_line, load_prompt, run_chain, stream_chain
 
-_PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "goal_oriented.txt"
-
-_SYSTEM_PROMPT: str = (
-    _PROMPT_PATH.read_text(encoding="utf-8")
-    if _PROMPT_PATH.exists()
-    else (
-        "당신은 IT·개발 분야 커리어 멘토입니다. "
-        "사용자의 목표와 현재 상황을 분석하여 단계적으로 읽어야 할 도서를 큐레이션해주세요. "
-        "자기개발 → IT 입문 → 포트폴리오/취업 준비 순서로 여러 카테고리를 조합한 로드맵 형식으로 구성하고, "
-        "추천 도서는 반드시 제공된 목록에서만 선택하세요."
-    )
+_SYSTEM_PROMPT: str = load_prompt(
+    "goal_oriented",
+    "당신은 IT·개발 분야 커리어 멘토입니다. "
+    "사용자의 목표와 현재 상황을 분석하여 단계적으로 읽어야 할 도서를 큐레이션해주세요. "
+    "자기개발 → IT 입문 → 포트폴리오/취업 준비 순서로 여러 카테고리를 조합한 로드맵 형식으로 구성하고, "
+    "추천 도서는 반드시 제공된 목록에서만 선택하세요.",
 )
 
 
@@ -30,14 +22,7 @@ def _build_messages(inputs: dict) -> list:
     books = inputs.get("books", [])
     history = inputs.get("history", [])
 
-    book_list = "\n".join(
-        "- {} {} (난이도: {})".format(
-            b.get("book_code") or "D-{:03d}".format(b["book_list_id"]),
-            b["title"],
-            b.get("difficulty", "미분류"),
-        )
-        for b in books
-    )
+    book_list = "\n".join(format_book_line(b) for b in books)
 
     user_content = f"""질문: {question}
 
@@ -58,13 +43,10 @@ def _build_messages(inputs: dict) -> list:
 
 
 async def goal_oriented_chain(inputs: dict) -> str:
-    llm = get_llm()
-    response = await llm.ainvoke(_build_messages(inputs))
-    return response.content
+    return await run_chain(_build_messages, inputs)
 
 
 async def goal_oriented_chain_stream(inputs: dict):
     """토큰 단위로 스트리밍하는 async generator."""
-    llm = get_llm()
-    async for chunk in llm.astream(_build_messages(inputs)):
-        yield chunk.content
+    async for chunk in stream_chain(_build_messages, inputs):
+        yield chunk

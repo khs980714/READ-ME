@@ -7,14 +7,23 @@
 
 난이도 순서 상수
   - DIFFICULTY_ORDER: fallback 방향 및 키워드 우선순위 판단에 공유 사용
+
+체인 실행 헬퍼 (load_prompt / run_chain / stream_chain)
+  - specific_search·goal_oriented·career_certification·level_based 체인이 공통으로
+    사용하던 "프롬프트 파일 로드 + LLM invoke/stream" 보일러플레이트를 통합합니다.
 """
 
 import re
+from pathlib import Path
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from llm import get_llm
+
 # 최근 유지할 메시지 수 (user + assistant 합산)
 HISTORY_WINDOW: int = 6
+
+_PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 _ASCII_ALPHA_RE = re.compile(r'[a-zA-Z]+')
 
@@ -59,3 +68,32 @@ def build_history_messages(history: list[dict]) -> list:
         elif role == "assistant":
             messages.append(AIMessage(content=content))
     return messages
+
+
+def load_prompt(name: str, fallback: str) -> str:
+    """prompts/{name}.txt 파일이 있으면 그 내용을, 없으면 fallback 문자열을 반환합니다."""
+    path = _PROMPTS_DIR / f"{name}.txt"
+    return path.read_text(encoding="utf-8") if path.exists() else fallback
+
+
+def format_book_line(b: dict) -> str:
+    """도서 목록을 프롬프트에 넣기 위한 기본 포맷 라인.
+
+    예) "- D-001 혼자 공부하는 파이썬 (난이도: 입문)"
+    """
+    code = b.get("book_code") or "D-{:03d}".format(b["book_list_id"])
+    return "- {} {} (난이도: {})".format(code, b["title"], b.get("difficulty", "미분류"))
+
+
+async def run_chain(build_messages_fn, inputs: dict) -> str:
+    """build_messages_fn(inputs)로 메시지를 만들어 LLM을 단일 호출하고 응답 텍스트를 반환합니다."""
+    llm = get_llm()
+    response = await llm.ainvoke(build_messages_fn(inputs))
+    return response.content
+
+
+async def stream_chain(build_messages_fn, inputs: dict):
+    """build_messages_fn(inputs)로 메시지를 만들어 토큰 단위로 스트리밍하는 async generator."""
+    llm = get_llm()
+    async for chunk in llm.astream(build_messages_fn(inputs)):
+        yield chunk.content

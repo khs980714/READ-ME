@@ -367,16 +367,25 @@ function renderRecommendations(recs, qtype) {
   return section;
 }
 
+// ── 도서 플레이스홀더 아이콘 (표지 없을 때 공용) ─────────
+function bookPlaceholderSVG() {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>
+    </svg>`;
+}
+
 // ── 추천 카드 (그룹 대표) ────────────────────────────────
-function makeGroupCard(group, allGroups, displayRank) {
+// onSelect가 주어지면 클릭/엔터 시 그것을 호출하고, 없으면 기본 상세 모달을 엽니다.
+function makeGroupCard(group, allGroups, displayRank, onSelect) {
   const { rep, editions } = group;
   const div = document.createElement("div");
   div.className = "rec-card";
   div.setAttribute("role", "button");
   div.setAttribute("tabindex", "0");
-  div.addEventListener("click", () => openDetailModal(group, allGroups));
+  const select = onSelect || (() => openDetailModal(group, allGroups));
+  div.addEventListener("click", select);
   div.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") openDetailModal(group, allGroups);
+    if (e.key === "Enter" || e.key === " ") select();
   });
 
   const thumb = document.createElement("div");
@@ -389,9 +398,7 @@ function makeGroupCard(group, allGroups, displayRank) {
   } else {
     const ph = document.createElement("div");
     ph.className = "rec-card-thumb-placeholder";
-    ph.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-      <path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>
-    </svg>`;
+    ph.innerHTML = bookPlaceholderSVG();
     thumb.appendChild(ph);
   }
   const rank = displayRank != null ? displayRank : rep.rank;
@@ -460,14 +467,9 @@ function renderModalListPage() {
   modalBookList.innerHTML = "";
   pageGroups.forEach((g, i) => {
     const displayRank = start + i + 1;
-    const c = makeGroupCard(g, _modal.allGroups, displayRank);
-    c.style.width = "100%";
-    const clone = c.cloneNode(true);
-    clone.addEventListener("click", () => openDetailFromList(g));
-    clone.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") openDetailFromList(g);
-    });
-    modalBookList.appendChild(clone);
+    const card = makeGroupCard(g, _modal.allGroups, displayRank, () => openDetailFromList(g));
+    card.style.width = "100%";
+    modalBookList.appendChild(card);
   });
   modalBookList.scrollTop = 0;
 
@@ -496,23 +498,23 @@ function renderModalListPage() {
 }
 
 // ── 모달: 상세보기 열기 ──────────────────────────────────
-function openDetailModal(group, allGroups) {
-  _modal.allGroups = allGroups || _modal.allGroups;
-  _modal.detailGroup    = group;
-  _modal.state     = "detail";
+function _showDetailPane(group) {
+  _modal.detailGroup = group;
+  _modal.state = "detail";
   modalBack.hidden = false;
   modalTitle.textContent = group.rep.title;
   renderModalDetail(group);
+}
+
+function openDetailModal(group, allGroups) {
+  _modal.allGroups = allGroups || _modal.allGroups;
+  _showDetailPane(group);
   moreModal.hidden = false;
   document.body.style.overflow = "hidden";
 }
 
 function openDetailFromList(group) {
-  _modal.detailGroup = group;
-  _modal.state  = "detail";
-  modalBack.hidden = false;
-  modalTitle.textContent = group.rep.title;
-  renderModalDetail(group);
+  _showDetailPane(group);
 }
 
 function renderModalDetail(group) {
@@ -536,9 +538,7 @@ function renderModalDetail(group) {
     img.alt = rep.title;
     thumb.appendChild(img);
   } else {
-    thumb.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-      <path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>
-    </svg>`;
+    thumb.innerHTML = bookPlaceholderSVG();
   }
 
   const meta = document.createElement("div");

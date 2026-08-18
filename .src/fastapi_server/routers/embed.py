@@ -6,6 +6,8 @@ from llm import get_embeddings, get_llm
 from db import upsert_embedding
 from langchain_core.messages import HumanMessage
 
+from chains.utils import DIFFICULTY_ORDER
+
 router = APIRouter()
 
 
@@ -89,8 +91,7 @@ async def classify_difficulty(req: ClassifyRequest):
     )
     difficulty = await _call_llm(prompt)
 
-    valid = ("입문", "초급", "중급", "고급")
-    for v in valid:
+    for v in DIFFICULTY_ORDER:
         if v in difficulty:
             return ClassifyResponse(difficulty=v)
 

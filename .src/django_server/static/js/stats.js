@@ -25,6 +25,16 @@
 
   const TOOLTIP_BASE = { position: "cursor" };
 
+  /* ── 툴팁 라벨 콜백 공용 헬퍼 ─────────────────────────────── */
+  // 막대 차트류: 값만 표시 (예: " 12권")
+  function valueTooltip(accessor) {
+    return { label: ctx => ` ${accessor(ctx).toLocaleString()}권` };
+  }
+  // 도넛 차트류: 라벨 + 값 표시 (예: " Python: 12권")
+  function labeledTooltip() {
+    return { label: ctx => ` ${ctx.label}: ${ctx.parsed.toLocaleString()}권` };
+  }
+
   /* ── 탭 전환 ─────────────────────────────────────────────── */
   document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -150,7 +160,7 @@
           legend: { display: false },
           tooltip: {
             ...TOOLTIP_BASE,
-            callbacks: { label: ctx => ` ${ctx.parsed[horizontal ? "x" : "y"].toLocaleString()}권` },
+            callbacks: valueTooltip(ctx => ctx.parsed[horizontal ? "x" : "y"]),
           },
         },
         scales: {
@@ -181,7 +191,7 @@
           legend: { position: "right", labels: { font: { size: 11 }, boxWidth: 12 } },
           tooltip: {
             ...TOOLTIP_BASE,
-            callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed.toLocaleString()}권` },
+            callbacks: labeledTooltip(),
           },
         },
         onClick: (_, elements) => {
@@ -233,7 +243,7 @@
           legend: { display: false },
           tooltip: {
             ...TOOLTIP_BASE,
-            callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed.toLocaleString()}권` },
+            callbacks: labeledTooltip(),
           },
         },
       },
@@ -272,7 +282,7 @@
           legend: { position: "bottom", labels: { font: { size: 12 }, boxWidth: 12, padding: 16 } },
           tooltip: {
             ...TOOLTIP_BASE,
-            callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed.toLocaleString()}권` },
+            callbacks: labeledTooltip(),
           },
         },
       },
@@ -303,7 +313,7 @@
           legend: { display: false },
           tooltip: {
             ...TOOLTIP_BASE,
-            callbacks: { label: ctx => ` ${ctx.parsed.x.toLocaleString()}권` },
+            callbacks: valueTooltip(ctx => ctx.parsed.x),
           },
         },
         scales: {

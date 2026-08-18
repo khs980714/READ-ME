@@ -4,7 +4,7 @@ PostgreSQL 연결 (psycopg2 + pgvector)
 변경 이력:
 - ThreadedConnectionPool 도입: 요청마다 새 커넥션 생성·폐기 비용 제거
 - asyncio.to_thread 래퍼: 동기 psycopg2 호출이 이벤트 루프를 블로킹하지 않도록 분리
-- vector_search / vector_search_by_difficulty 쿼리 통합 (difficulty=None 중복 제거)
+- vector_search / vector_search_by_difficulty 통합: 공개 async API를 vector_search(difficulty=None) 하나로 병합
 """
 
 import asyncio
@@ -35,6 +35,14 @@ def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
             dsn=settings.DATABASE_URL,
         )
     return _pool
+
+
+def close_pool() -> None:
+    """서버 종료 시 커넥션 풀을 해제합니다 (main.py의 lifespan에서 호출)."""
+    global _pool
+    if _pool is not None:
+        _pool.closeall()
+        _pool = None
 
 
 @contextmanager
@@ -190,25 +198,13 @@ async def vector_search(
     query_embedding: list[float],
     threshold: float,
     limit: int,
+    difficulty: str | None = None,
     is_certification: bool = False,
     category: str | None = None,
 ) -> list[dict]:
-    """코사인 유사도 기반 도서 벡터 검색 (async)."""
+    """코사인 유사도 기반 도서 벡터 검색 (async). difficulty/category 지정 시 필터 적용."""
     return await asyncio.to_thread(
-        _vector_search_sync, query_embedding, threshold, limit, None, is_certification, category
-    )
-
-
-async def vector_search_by_difficulty(
-    query_embedding: list[float],
-    threshold: float,
-    limit: int,
-    difficulty: str | None = None,
-    is_certification: bool = False,
-) -> list[dict]:
-    """난이도 필터 포함 도서 벡터 검색 (async)."""
-    return await asyncio.to_thread(
-        _vector_search_sync, query_embedding, threshold, limit, difficulty, is_certification
+        _vector_search_sync, query_embedding, threshold, limit, difficulty, is_certification, category
     )
 
 

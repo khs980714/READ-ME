@@ -13,7 +13,7 @@
 from django.core.management.base import BaseCommand
 
 from books.models import BookList
-from books.services import _save_thumbnail
+from books.services import bulk_refresh_thumbnails
 
 
 class Command(BaseCommand):
@@ -35,23 +35,13 @@ class Command(BaseCommand):
         total = qs.count()
         self.stdout.write(f"대상 도서: {total}권")
 
-        ok = fail = 0
-        for bl in qs.iterator():
-            # 기존 파일 삭제 후 재다운로드 (덮어쓰기 보장, 중복 파일 방지)
-            if bl.thumbnail:
-                bl.thumbnail.delete(save=False)
-            if _save_thumbnail(bl, bl.thumbnail_url):
-                bl.save(update_fields=["thumbnail"])
-                ok += 1
+        def _log_item(bl, success: bool):
+            if success:
                 self.stdout.write(f"  ✓ [{bl.pk}] {bl.title}")
             else:
-                # 다운로드 실패 + 파일이 삭제된 경우 DB도 비워서 일치
-                if not bl.thumbnail.name:
-                    bl.save(update_fields=["thumbnail"])
-                fail += 1
-                self.stdout.write(
-                    self.style.WARNING(f"  ✗ [{bl.pk}] {bl.title} — 다운로드 실패")
-                )
+                self.stdout.write(self.style.WARNING(f"  ✗ [{bl.pk}] {bl.title} — 다운로드 실패"))
+
+        ok, fail = bulk_refresh_thumbnails(qs, on_item=_log_item)
 
         self.stdout.write(
             self.style.SUCCESS(f"\n완료: 성공 {ok}권 / 실패 {fail}권 / 전체 {total}권")

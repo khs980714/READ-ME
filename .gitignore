@@ -38,5 +38,9 @@ test/
 .src/fastapi_server/tests/load_report.html
 .src/fastapi_server/tests/load_stats_*.csv
 
+# ── 분류기 정확도 테스트 결과 (run_classifier_test.py 실행 산출물) ──
+.src/fastapi_server/tests/classifier_results.md
+.src/fastapi_server/tests/classifier_results.csv
+
 # 로컬 전용 메모
 todo.md

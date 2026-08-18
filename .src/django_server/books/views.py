@@ -1,3 +1,4 @@
+import json
 import logging
 import threading
 
@@ -13,6 +14,18 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.db.models import Count
 
 from .models import Author, Book, BookList, BookListCategory, Category, Publisher
+from .stats_keywords import TECH_KEYWORDS
+from .services import (
+    auto_classify_book,
+    bulk_refresh_thumbnails,
+    collect_book_data,
+    extract_book_form,
+    find_duplicate_booklist,
+    parse_book_codes,
+    refresh_embedding,
+    save_thumbnail,
+    scrape_from_url,
+)
 
 # 카테고리 목록 캐시 TTL (초) — 카테고리는 거의 변하지 않으므로 10분 캐시
 _CATEGORY_CACHE_KEY = "books:all_categories"
@@ -121,28 +134,12 @@ def book_add(request):
     duplicate_books = []
 
     if request.method == "POST":
-        from .services import classify_category, classify_difficulty, parse_book_codes
-
         form_data = request.POST
         book_code_raw = request.POST.get("book_code", "").strip()
         book_codes = parse_book_codes(book_code_raw)
-        title = request.POST.get("title", "").strip()
-        subtitle = request.POST.get("subtitle", "").strip()
-        edition = request.POST.get("edition", "").strip()
-        author_name = request.POST.get("author", "").strip()
-        publisher_name = request.POST.get("publisher", "").strip()
-        difficulty = request.POST.get("difficulty", "")
-        pub_year_str = request.POST.get("publication_year", "").strip()
-        publication_year = int(pub_year_str) if pub_year_str.isdigit() else None
-        thumbnail_url = request.POST.get("thumbnail_url", "").strip()
-        description = request.POST.get("description", "").strip()
-        toc = request.POST.get("toc", "").strip()
-        source_url = request.POST.get("source_url", "").strip()
-        category_ids = request.POST.getlist("categories")
-        is_active = request.POST.get("is_active") == "on"
-        confirm_link = request.POST.get("confirm_link") == "true"
+        fields = extract_book_form(request)
 
-        if not book_codes or not all([title, author_name, publisher_name]):
+        if not book_codes or not all([fields["title"], fields["author_name"], fields["publisher_name"]]):
             error = "도서 코드, 도서명, 저자, 출판사는 필수 항목입니다."
         else:
             existing_codes = list(
@@ -152,16 +149,16 @@ def book_add(request):
                 error = f"이미 존재하는 도서 코드입니다: {', '.join(existing_codes)}"
             else:
                 try:
-                    author, _ = Author.objects.get_or_create(name=author_name)
-                    publisher, _ = Publisher.objects.get_or_create(name=publisher_name)
+                    author, _ = Author.objects.get_or_create(name=fields["author_name"])
+                    publisher, _ = Publisher.objects.get_or_create(name=fields["publisher_name"])
 
                     # 동일한 (title, edition, author, publisher) BookList 존재 여부 확인
-                    try:
-                        existing_bl = BookList.objects.get(
-                            title=title, edition=edition, author=author, publisher=publisher
-                        )
+                    existing_bl = find_duplicate_booklist(
+                        fields["title"], fields["edition"], author, publisher
+                    )
+                    if existing_bl:
                         # 중복 BookList 발견
-                        if not confirm_link:
+                        if not fields["confirm_link"]:
                             duplicate_book_list = existing_bl
                             duplicate_books = list(existing_bl.books.all())
                         else:
@@ -171,60 +168,53 @@ def book_add(request):
                                     Book.objects.create(
                                         book_code=code,
                                         book_list=existing_bl,
-                                        is_active=is_active,
+                                        is_active=fields["is_active"],
                                     )
                             messages.success(
                                 request,
-                                f"도서 [{', '.join(book_codes)}] {title} 이(가) 기존 도서로 연결되어 추가되었습니다.",
+                                f"도서 [{', '.join(book_codes)}] {fields['title']} 이(가) 기존 도서로 연결되어 추가되었습니다.",
                             )
                             return redirect("books:manage")
-                    except BookList.DoesNotExist:
+                    else:
                         # 미선택 항목은 도서 소개가 있을 때 서버(LLM)가 자동 분류
-                        if not difficulty and description:
-                            classified_difficulty = classify_difficulty(title, description, [])
-                            if classified_difficulty in dict(difficulties):
-                                difficulty = classified_difficulty
-                        if not category_ids and description:
-                            classified_names = classify_category(title, description)
-                            if classified_names:
-                                category_ids = list(
-                                    Category.objects.filter(name__in=classified_names)
-                                    .values_list("id", flat=True)
-                                )
+                        difficulty, category_ids = auto_classify_book(
+                            fields["title"], fields["description"], fields["difficulty"],
+                            fields["category_ids"], difficulties,
+                        )
 
                         # 중복 없음 — 신규 BookList 생성 후 코드별 Book 연결
                         with transaction.atomic():
                             book_list = BookList.objects.create(
-                                title=title,
-                                subtitle=subtitle,
-                                edition=edition,
+                                title=fields["title"],
+                                subtitle=fields["subtitle"],
+                                edition=fields["edition"],
                                 author=author,
                                 publisher=publisher,
                                 difficulty=difficulty,
-                                publication_year=publication_year,
-                                thumbnail_url=thumbnail_url,
-                                description=description,
-                                toc=toc,
-                                source_url=source_url,
+                                publication_year=fields["publication_year"],
+                                thumbnail_url=fields["thumbnail_url"],
+                                description=fields["description"],
+                                toc=fields["toc"],
+                                source_url=fields["source_url"],
                             )
                             book_list.categories.set(Category.objects.filter(id__in=category_ids))
                             for code in book_codes:
                                 Book.objects.create(
                                     book_code=code,
                                     book_list=book_list,
-                                    is_active=is_active,
+                                    is_active=fields["is_active"],
                                 )
-                        if thumbnail_url and not book_list.thumbnail:
-                            from .services import _save_thumbnail
-                            if _save_thumbnail(book_list, thumbnail_url):
+                        if fields["thumbnail_url"] and not book_list.thumbnail:
+                            if save_thumbnail(book_list, fields["thumbnail_url"]):
                                 book_list.save(update_fields=["thumbnail"])
-                        messages.success(request, f"도서 [{', '.join(book_codes)}] {title} 이(가) 추가되었습니다.")
+                        messages.success(request, f"도서 [{', '.join(book_codes)}] {fields['title']} 이(가) 추가되었습니다.")
                         return redirect("books:manage")
 
                 except IntegrityError:
                     error = f"도서 코드 처리 중 중복 오류가 발생했습니다: {', '.join(book_codes)}"
-                except Exception as e:
-                    error = str(e)
+                except Exception:
+                    logger.exception("도서 추가 중 오류 (book_codes=%s)", book_codes)
+                    error = "도서 추가 중 오류가 발생했습니다. 입력값을 확인한 뒤 다시 시도해주세요."
 
     return render(request, "books/manage_form.html", {
         "mode": "add",
@@ -269,121 +259,97 @@ def book_edit(request, pk):
 
     if request.method == "POST":
         form_data = request.POST
-        title = request.POST.get("title", "").strip()
-        subtitle = request.POST.get("subtitle", "").strip()
-        edition = request.POST.get("edition", "").strip()
-        author_name = request.POST.get("author", "").strip()
-        publisher_name = request.POST.get("publisher", "").strip()
-        difficulty = request.POST.get("difficulty", "")
-        pub_year_str = request.POST.get("publication_year", "").strip()
-        publication_year = int(pub_year_str) if pub_year_str.isdigit() else None
-        thumbnail_url = request.POST.get("thumbnail_url", "").strip()
-        description = request.POST.get("description", "").strip()
-        toc = request.POST.get("toc", "").strip()
-        source_url = request.POST.get("source_url", "").strip()
-        category_ids = request.POST.getlist("categories")
-        is_active = request.POST.get("is_active") == "on"
-        confirm_link = request.POST.get("confirm_link") == "true"
+        fields = extract_book_form(request)
+        category_ids = fields["category_ids"]
 
-        if not all([title, author_name, publisher_name]):
+        if not all([fields["title"], fields["author_name"], fields["publisher_name"]]):
             error = "도서명, 저자, 출판사는 필수 항목입니다."
         else:
             try:
-                from .services import _save_thumbnail
                 prev_title         = book_list.title
                 prev_description   = book_list.description
                 prev_thumbnail_url = book_list.thumbnail_url
 
-                author, _ = Author.objects.get_or_create(name=author_name)
-                publisher, _ = Publisher.objects.get_or_create(name=publisher_name)
+                author, _ = Author.objects.get_or_create(name=fields["author_name"])
+                publisher, _ = Publisher.objects.get_or_create(name=fields["publisher_name"])
 
                 # 동일한 (title, edition, author, publisher) 를 가진 다른 BookList 존재 여부 확인
-                duplicate_found = False
-                try:
-                    existing_bl = BookList.objects.get(
-                        title=title, edition=edition, author=author, publisher=publisher
-                    )
-                    if existing_bl.pk != book_list.pk:
-                        duplicate_found = True
-                        if not confirm_link:
-                            # 중복 경고 표시
-                            duplicate_book_list = existing_bl
-                            duplicate_books = list(existing_bl.books.all())
-                            selected_category_ids = set(int(i) for i in category_ids if i)
-                        else:
-                            # 기존 BookList로 re-link
-                            old_book_list = book.book_list
-                            book.book_list = existing_bl
-                            book.is_active = is_active
-                            book.save()
-                            existing_bl.categories.set(Category.objects.filter(id__in=category_ids))
-                            # 기존 BookList에 더 이상 Book이 없으면 삭제
-                            if not old_book_list.books.exists():
-                                old_book_list.delete()
-                            messages.success(
-                                request,
-                                f"도서 [{book.book_code}]이(가) 기존 도서 '{existing_bl.full_title}'로 연결되었습니다.",
-                            )
-                            return redirect("books:manage")
-                except BookList.DoesNotExist:
-                    pass
+                existing_bl = find_duplicate_booklist(
+                    fields["title"], fields["edition"], author, publisher, exclude_pk=book_list.pk
+                )
+                duplicate_found = existing_bl is not None
+
+                if duplicate_found:
+                    if not fields["confirm_link"]:
+                        # 중복 경고 표시
+                        duplicate_book_list = existing_bl
+                        duplicate_books = list(existing_bl.books.all())
+                        selected_category_ids = set(int(i) for i in category_ids if i)
+                    else:
+                        # 기존 BookList로 re-link
+                        old_book_list = book.book_list
+                        book.book_list = existing_bl
+                        book.is_active = fields["is_active"]
+                        book.save()
+                        existing_bl.categories.set(Category.objects.filter(id__in=category_ids))
+                        # 기존 BookList에 더 이상 Book이 없으면 삭제
+                        if not old_book_list.books.exists():
+                            old_book_list.delete()
+                        messages.success(
+                            request,
+                            f"도서 [{book.book_code}]이(가) 기존 도서 '{existing_bl.full_title}'로 연결되었습니다.",
+                        )
+                        return redirect("books:manage")
 
                 if not duplicate_found:
                     # 중복 없음 — 정상 저장
                     # 미선택 항목은 도서 소개가 있을 때 서버(LLM)가 자동 분류
-                    from .services import classify_category, classify_difficulty
-                    if not difficulty and description:
-                        classified_difficulty = classify_difficulty(title, description, [])
-                        if classified_difficulty in dict(difficulties):
-                            difficulty = classified_difficulty
-                    if not category_ids and description:
-                        classified_names = classify_category(title, description)
-                        if classified_names:
-                            category_ids = list(
-                                Category.objects.filter(name__in=classified_names)
-                                .values_list("id", flat=True)
-                            )
+                    difficulty, category_ids = auto_classify_book(
+                        fields["title"], fields["description"], fields["difficulty"],
+                        category_ids, difficulties,
+                    )
 
                     # 썸네일: model.save() 전에 처리해 파일 경로를 한 번의 save()로 함께 저장
-                    if thumbnail_url and thumbnail_url != prev_thumbnail_url:
+                    if fields["thumbnail_url"] and fields["thumbnail_url"] != prev_thumbnail_url:
                         if book_list.thumbnail:
                             book_list.thumbnail.delete(save=False)
-                        _save_thumbnail(book_list, thumbnail_url)
+                        save_thumbnail(book_list, fields["thumbnail_url"])
 
-                    book_list.title = title
-                    book_list.subtitle = subtitle
-                    book_list.edition = edition
+                    book_list.title = fields["title"]
+                    book_list.subtitle = fields["subtitle"]
+                    book_list.edition = fields["edition"]
                     book_list.author = author
                     book_list.publisher = publisher
                     book_list.difficulty = difficulty
-                    book_list.publication_year = publication_year
-                    book_list.thumbnail_url = thumbnail_url
-                    book_list.description = description
-                    book_list.toc = toc
-                    book_list.source_url = source_url
+                    book_list.publication_year = fields["publication_year"]
+                    book_list.thumbnail_url = fields["thumbnail_url"]
+                    book_list.description = fields["description"]
+                    book_list.toc = fields["toc"]
+                    book_list.source_url = fields["source_url"]
                     book_list.save()  # thumbnail 파일 경로 포함 전체 저장
                     book_list.categories.set(Category.objects.filter(id__in=category_ids))
-                    book.is_active = is_active
+                    book.is_active = fields["is_active"]
                     book.save()
 
                     # 제목 또는 설명이 바뀌고 설명이 있으면 임베딩 재생성
                     needs_reembed = (
-                        (title != prev_title or description != prev_description)
-                        and bool(description)
+                        (fields["title"] != prev_title or fields["description"] != prev_description)
+                        and bool(fields["description"])
                     )
                     if needs_reembed:
                         _schedule_embedding_refresh(book_list.pk)
                         messages.success(
                             request,
-                            f"도서 [{book.book_code}] {title} 이(가) 수정되었습니다. "
+                            f"도서 [{book.book_code}] {fields['title']} 이(가) 수정되었습니다. "
                             "임베딩 재생성이 백그라운드에서 진행됩니다.",
                         )
                     else:
-                        messages.success(request, f"도서 [{book.book_code}] {title} 이(가) 수정되었습니다.")
+                        messages.success(request, f"도서 [{book.book_code}] {fields['title']} 이(가) 수정되었습니다.")
                     return redirect("books:manage")
 
-            except Exception as e:
-                error = str(e)
+            except Exception:
+                logger.exception("도서 수정 중 오류 (pk=%s)", pk)
+                error = "도서 수정 중 오류가 발생했습니다. 입력값을 확인한 뒤 다시 시도해주세요."
 
         if not duplicate_book_list:
             selected_category_ids = set(int(i) for i in category_ids if i)
@@ -426,17 +392,7 @@ def book_sync_thumbnails(request):
     def _run():
         global _thumb_sync_in_progress
         try:
-            from .services import _save_thumbnail
-            qs = BookList.objects.exclude(thumbnail_url="")
-            for bl in qs.iterator():
-                # 기존 파일 먼저 삭제하여 덮어쓰기 보장
-                if bl.thumbnail:
-                    bl.thumbnail.delete(save=False)
-                if _save_thumbnail(bl, bl.thumbnail_url):
-                    bl.save(update_fields=["thumbnail"])
-                elif not bl.thumbnail.name:
-                    # 다운로드 실패 + 파일 삭제된 경우 DB도 비워서 일치
-                    bl.save(update_fields=["thumbnail"])
+            bulk_refresh_thumbnails(BookList.objects.exclude(thumbnail_url=""))
         except Exception as exc:
             logger.error("썸네일 일괄 갱신 오류: %s", exc)
         finally:
@@ -469,8 +425,6 @@ def _schedule_embedding_refresh(book_list_pk: int) -> None:
 
     def _run():
         try:
-            from .models import BookList
-            from .services import refresh_embedding
             bl = BookList.objects.get(pk=book_list_pk)
             refresh_embedding(bl)
         except Exception as exc:
@@ -487,7 +441,6 @@ def _schedule_embedding_refresh(book_list_pk: int) -> None:
 def book_collect(request, pk):
     """개별 도서 데이터 수집 (AJAX). force=true이면 기존 데이터 덮어쓰기."""
     book = get_object_or_404(Book, pk=pk)
-    import json
     try:
         body = json.loads(request.body or "{}")
     except Exception:
@@ -495,7 +448,6 @@ def book_collect(request, pk):
     force = body.get("force", False)
 
     try:
-        from .services import collect_book_data
         result = collect_book_data(book.book_list, force=force)
         return JsonResponse({"ok": True, **result})
     except Exception as exc:
@@ -514,7 +466,6 @@ def book_scrape_url(request):
         {"status": "unsupported"}
         {"status": "error", "message": "..."}
     """
-    import json
     try:
         body = json.loads(request.body or "{}")
     except Exception:
@@ -524,7 +475,6 @@ def book_scrape_url(request):
     if not url:
         return JsonResponse({"status": "error", "message": "URL을 입력해주세요."}, status=400)
 
-    from .services import scrape_from_url
     result = scrape_from_url(url)
     return JsonResponse(result)
 
@@ -533,10 +483,9 @@ def book_scrape_url(request):
 @require_POST
 def book_apply_thumbnail(request, pk):
     """썸네일 URL 즉시 다운로드·저장 (수정 폼 AJAX용)."""
-    import json as _json
     book = get_object_or_404(Book, pk=pk)
     try:
-        body = _json.loads(request.body or "{}")
+        body = json.loads(request.body or "{}")
     except Exception:
         return JsonResponse({"ok": False, "error": "잘못된 요청"}, status=400)
 
@@ -545,12 +494,11 @@ def book_apply_thumbnail(request, pk):
         return JsonResponse({"ok": False, "error": "URL이 없습니다."}, status=400)
 
     try:
-        from .services import _save_thumbnail
         bl = book.book_list
         if bl.thumbnail:
             bl.thumbnail.delete(save=False)
         bl.thumbnail_url = thumbnail_url
-        saved = _save_thumbnail(bl, thumbnail_url)
+        saved = save_thumbnail(bl, thumbnail_url)
         bl.save(update_fields=["thumbnail_url", "thumbnail"])
         return JsonResponse({"ok": True, "saved": saved})
     except Exception as exc:
@@ -571,138 +519,28 @@ def book_delete(request, pk):
 
 # ── 통계 페이지 ───────────────────────────────────────────────
 
-# 카테고리별 기술 스택 키워드 정의
-# 형식: { 카테고리명: { 기술명: ([포함 키워드], [제외 키워드]) } }
-_TECH_KEYWORDS: dict[str, dict[str, tuple[list, list]]] = {
-    "프로그래밍 언어": {
-        "Python":     (["파이썬", "python"], []),
-        "Java":       (["자바", "java"], ["자바스크립트", "javascript"]),
-        "JavaScript": (["자바스크립트", "javascript"], []),
-        "C/C++":      (["c언어", "c++", "씨언어", "c 프로그래밍"], []),
-        "Go":         (["golang", "go 언어", "고언어"], []),
-        "TypeScript": (["타입스크립트", "typescript"], []),
-        "Kotlin":     (["코틀린", "kotlin"], []),
-        "PHP":        (["php"], []),
-        "Rust":       (["러스트", "rust 언어", "rust프로그래밍"], []),
-        "Swift":      (["스위프트", "swift 언어"], []),
-        "R":          (["r 언어", "r프로그래밍", "r로 배우"], []),
-    },
-    "웹 개발": {
-        "React":      (["리액트", "react"], []),
-        "Spring":     (["스프링", "spring"], []),
-        "Vue.js":     (["뷰제이에스", "vue.js", "vue 3", "vue로"], ["리뷰"]),
-        "Node.js":    (["노드", "node.js", "nodejs"], []),
-        "TypeScript": (["타입스크립트", "typescript"], []),
-        "Next.js":    (["넥스트", "next.js"], []),
-        "HTML/CSS":   (["html", "css 레이아웃", "웹 퍼블"], []),
-        "Django":     (["장고", "django"], []),
-        "FastAPI":    (["fastapi"], []),
-        "PHP":        (["php"], []),
-    },
-    "모바일 개발": {
-        "Android":       (["안드로이드", "android"], []),
-        "Flutter":       (["플러터", "flutter"], []),
-        "iOS":           (["ios", "아이폰 앱", "아이폰앱"], []),
-        "Kotlin":        (["코틀린", "kotlin"], []),
-        "Swift":         (["스위프트", "swift"], []),
-        "React Native":  (["react native", "리액트 네이티브"], []),
-    },
-    "데이터베이스": {
-        "MySQL":         (["mysql", "마이에스큐엘", "마이sql"], []),
-        "PostgreSQL":    (["postgresql", "postgres"], []),
-        "MongoDB":       (["mongodb", "몽고db", "몽고디비"], []),
-        "Oracle":        (["오라클", "oracle"], []),
-        "Redis":         (["redis", "레디스"], []),
-        "Elasticsearch": (["elasticsearch", "엘라스틱서치", "엘라스틱"], []),
-        "SQL":           (["sql"], []),
-    },
-    "자료구조·알고리즘": {
-        "알고리즘":        (["알고리즘"], []),
-        "자료구조":        (["자료구조"], []),
-        "코딩테스트":      (["코딩테스트", "코딩 테스트"], []),
-        "Python 알고리즘": (["파이썬 알고리즘", "python 알고리즘", "파이썬으로 배우는 알고리즘"], []),
-        "Java 알고리즘":   (["자바 알고리즘", "java 알고리즘"], []),
-        "C++ 알고리즘":    (["c++ 알고리즘"], []),
-    },
-    "컴퓨터 과학": {
-        "운영체제":   (["운영체제"], []),
-        "네트워크":   (["네트워크"], []),
-        "Linux":     (["리눅스", "linux", "유닉스"], []),
-        "컴퓨터구조": (["컴퓨터 구조", "컴퓨터구조"], []),
-        "컴파일러":   (["컴파일러"], []),
-    },
-    "인공지능·데이터": {
-        "머신러닝":    (["머신러닝", "machine learning"], []),
-        "딥러닝":      (["딥러닝", "deep learning"], []),
-        "PyTorch":     (["파이토치", "pytorch"], []),
-        "TensorFlow":  (["텐서플로", "tensorflow"], []),
-        "pandas":      (["판다스", "pandas"], []),
-        "GPT·LLM":     (["gpt", "llm", "chatgpt", "거대 언어", "거대언어"], []),
-        "LangChain":   (["langchain", "랭체인"], []),
-        "데이터 분석": (["데이터 분석", "데이터분석"], []),
-    },
-    "DevOps·클라우드": {
-        "AWS":        (["aws", "아마존 웹 서비스"], []),
-        "Docker":     (["도커", "docker"], []),
-        "Kubernetes": (["쿠버네티스", "kubernetes", "k8s"], []),
-        "Azure":      (["애저", "azure"], []),
-        "GCP":        (["gcp", "구글 클라우드"], []),
-        "Terraform":  (["테라폼", "terraform"], []),
-        "CI/CD":      (["ci/cd", "jenkins", "깃허브 액션", "github action", "github actions"], []),
-    },
-    "소프트웨어 공학": {
-        "클린코드":      (["클린코드", "clean code"], []),
-        "디자인패턴":    (["디자인패턴", "design pattern"], []),
-        "마이크로서비스":(["마이크로서비스", "microservice"], []),
-        "TDD":           (["tdd", "테스트 주도", "테스트주도"], []),
-        "리팩토링":      (["리팩토링", "refactoring"], []),
-        "DDD":           (["ddd", "도메인 주도"], []),
-        "애자일":        (["애자일", "agile"], []),
-    },
-    "보안": {
-        "정보보안":    (["정보보안"], []),
-        "네트워크보안":(["네트워크 보안", "네트워크보안"], []),
-        "웹보안":      (["웹 보안", "웹보안", "owasp"], []),
-        "암호학":      (["암호학", "암호 알고리즘", "cryptography"], []),
-        "해킹":        (["해킹", "hacking", "해커", "버그바운티"], []),
-        "침투테스트":  (["침투 테스트", "침투테스트", "penetration"], []),
-        "포렌식":      (["포렌식", "forensic"], []),
-    },
-    "자격증·취업": {
-        "정보처리기사":  (["정보처리기사"], []),
-        "SQLD":          (["sqld", "sql 개발자"], []),
-        "정보보안기사":  (["정보보안기사"], []),
-        "네트워크관리사":(["네트워크관리사"], []),
-        "AWS 자격증":    (["aws 자격", "aws certified"], []),
-        "리눅스마스터":  (["리눅스마스터", "lpi"], []),
-        "빅데이터":      (["빅데이터 분석기사", "빅데이터 준전문가"], []),
-    },
-    "IT 교양": {
-        "개발자 에세이": (["개발자로", "개발자의", "프로그래머로", "개발자가"], []),
-        "AI·미래기술":   (["ai 시대", "인공지능 시대", "미래 기술"], []),
-        "스타트업":      (["스타트업", "창업"], []),
-        "IT 경영":       (["디지털 전환", "cto", "it 경영"], []),
-        "비전공자":      (["비전공자", "it 입문", "코딩 입문"], []),
-    },
-}
-
 _STATS_CACHE_KEY = "books:stats_data_v2"
 _STATS_CACHE_TTL = 300  # 5분
+
+
+def _matching_queryset(includes: list[str], excludes: list[str]):
+    """제목에 includes 중 하나 이상을 포함하고 excludes는 모두 제외하는 BookList 쿼리셋."""
+    include_q = Q()
+    for kw in includes:
+        include_q |= Q(title__icontains=kw)
+    qs = BookList.objects.filter(include_q)
+    for ex in excludes:
+        qs = qs.exclude(title__icontains=ex)
+    return qs
 
 
 def _build_stack_data() -> dict:
     """카테고리별 기술 스택 키워드 카운트. PostgreSQL ILIKE 매칭."""
     result = {}
-    for cat_name, tech_map in _TECH_KEYWORDS.items():
+    for cat_name, tech_map in TECH_KEYWORDS.items():
         entries = []
         for tech, (includes, excludes) in tech_map.items():
-            include_q = Q()
-            for kw in includes:
-                include_q |= Q(title__icontains=kw)
-            qs = BookList.objects.filter(include_q)
-            for ex in excludes:
-                qs = qs.exclude(title__icontains=ex)
-            cnt = qs.count()
+            cnt = _matching_queryset(includes, excludes).count()
             if cnt > 0:
                 entries.append({"name": tech, "count": cnt})
         result[cat_name] = sorted(entries, key=lambda x: -x["count"])
@@ -719,16 +557,11 @@ def stats_books_api(request):
     """기술 스택 클릭 시 매칭 도서 목록 반환."""
     cat  = request.GET.get("cat", "")
     tech = request.GET.get("tech", "")
-    cat_map = _TECH_KEYWORDS.get(cat, {})
+    cat_map = TECH_KEYWORDS.get(cat, {})
     if tech not in cat_map:
         return JsonResponse({"books": [], "total": 0, "tech": tech})
     includes, excludes = cat_map[tech]
-    include_q = Q()
-    for kw in includes:
-        include_q |= Q(title__icontains=kw)
-    qs = BookList.objects.filter(include_q)
-    for ex in excludes:
-        qs = qs.exclude(title__icontains=ex)
+    qs = _matching_queryset(includes, excludes)
     total = qs.count()
     books = list(qs.order_by("title").values("id", "title", "difficulty")[:50])
     return JsonResponse({"books": books, "total": total, "tech": tech})

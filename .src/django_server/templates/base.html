@@ -57,26 +57,20 @@
 
   <!-- ── 유휴 타임아웃 (관리자 로그인 시) ──────────────────── -->
   {% if user.is_authenticated %}
-  <div id="idleModal" style="
-    display:none; position:fixed; inset:0; z-index:9999;
-    background:rgba(0,0,0,.5); align-items:center; justify-content:center;">
-    <div style="
-      background:#fff; border-radius:12px; padding:32px 36px;
-      max-width:360px; width:90%; text-align:center; box-shadow:0 8px 32px rgba(0,0,0,.2);">
+  <div id="idleModal" class="idle-modal-overlay">
+    <div class="idle-modal-card">
       <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2"
-           style="margin:0 auto 16px;">
+           class="idle-modal-icon">
         <circle cx="12" cy="12" r="10"/>
         <line x1="12" y1="8" x2="12" y2="12"/>
         <line x1="12" y1="16" x2="12.01" y2="16"/>
       </svg>
-      <p style="font-size:1.05rem;font-weight:700;margin-bottom:8px;">자동 로그아웃 예정</p>
-      <p style="font-size:0.88rem;color:#555;margin-bottom:20px;">
+      <p class="idle-modal-title">자동 로그아웃 예정</p>
+      <p class="idle-modal-desc">
         <span id="idleCountdown">2</span>분 후 자동으로 로그아웃됩니다.<br>
         계속 사용하려면 아래 버튼을 눌러주세요.
       </p>
-      <button onclick="resetIdle()" style="
-        background:#504197;color:#fff;border:none;border-radius:8px;
-        padding:10px 24px;font-size:0.9rem;font-weight:700;cursor:pointer;">
+      <button onclick="resetIdle()" class="idle-modal-btn">
         계속 사용하기
       </button>
     </div>
@@ -109,7 +103,7 @@
       }
 
       function showWarning() {
-        modal.style.display = "flex";
+        modal.classList.add("show");
         let secs = Math.round(WARNING_BEFORE_MS / 1000);
         countdownEl.textContent = Math.ceil(secs / 60);
         countdownInterval = setInterval(() => {
@@ -120,7 +114,7 @@
       }
 
       function hideWarning() {
-        modal.style.display = "none";
+        modal.classList.remove("show");
         if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
       }
 
@@ -134,7 +128,7 @@
 
       ["mousemove", "mousedown", "keypress", "touchstart", "scroll", "click"].forEach(evt => {
         document.addEventListener(evt, () => {
-          if (modal.style.display === "none") resetIdle();
+          if (!modal.classList.contains("show")) resetIdle();
         }, { passive: true });
       });
 
